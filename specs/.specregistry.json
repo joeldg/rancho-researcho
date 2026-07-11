@@ -2,7 +2,7 @@
   "project_type": "SaaS Backend API",
   "project": "github.com/joeldg/rancho-researcho",
   "channel": "stable",
-  "fetched_at": "2026-07-11T04:06:40.287Z",
+  "fetched_at": "2026-07-11T04:49:01.309Z",
   "specs": [
     {
       "filename": "AGENT_OPERATING_RULES.md",
@@ -96,6 +96,13 @@
       "sha256": "f9e3acc55cba81215d2023372c1f00378c750ff55e1bb005e5c01c15fb3e6094"
     },
     {
+      "filename": "RANCHO_DEPLOYMENT.md",
+      "version": "1.0.0",
+      "project_type": "github.com/joeldg/rancho-researcho",
+      "scope": "project",
+      "sha256": "48b59da5a28fbdb9b68f53d852910b3d5b43d169b271e098ef26b7c894526107"
+    },
+    {
       "filename": "RANCHO_LOCAL_LLM.md",
       "version": "1.0.1",
       "project_type": "github.com/joeldg/rancho-researcho",
@@ -110,6 +117,6 @@
       "sha256": "eed92855d479f42b03866a66db7e4dde699f3e332b22492152e8ad9ca6076b9d"
     }
   ],
-  "signature": "5BpiNa7VIz2OysMsO78Gu1Ky97aFveAycU3ZC/oIu2a6CdnAaAW+7QqSPZt9y5ewhy0v3kQUcqWDvjzRA704AQ==",
+  "signature": "E7wBayRqDm0j699WCGIZ4/KGWwys+Iuq+DcrtVcYdtK6ChHTfz0F61UfEhzSLCRUzf5aysHR0yCRBtAw0FlHCQ==",
   "signature_alg": "ed25519"
 }

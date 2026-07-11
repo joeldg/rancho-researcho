@@ -10,10 +10,10 @@ Goal: Implement the Parkour-compatible `/v1/search` endpoint using direct local 
 
 ### 1.1 Project Setup & Local Infrastructure
 - [x] Initialize Python FastAPI project with Poetry/pipenv/uv.
-- [ ] Create Docker Compose file with dependencies:
-  - [ ] PostgreSQL (for durable task and evidence metadata).
-  - [ ] Redis (for task queuing and event storage).
-  - [ ] SearXNG (local metasearch engine for private queries).
+- [x] Create Docker Compose file with dependencies:
+  - [x] PostgreSQL (for durable task and evidence metadata).
+  - [x] Redis (for task queuing and event storage).
+  - [x] SearXNG (local metasearch engine for private queries).
 - [x] Set up basic health, readiness, and metrics routes (`/health`, `/ready`, `/metrics`).
 - [x] Configure configuration loader (`pydantic-settings`) reading from `.env`.
 

@@ -1,0 +1,94 @@
+# @spec[RANCHO_DEPLOYMENT.md#requirements] Self-hosted Rancho stack.
+# req 1: four services on a private network; only the API port is published.
+# req 2: the API reaches SearXNG only via the internal service address.
+# req 4: PostgreSQL persists to a named volume; Redis is ephemeral.
+# req 5: every secret comes from the git-ignored .env, never from this file.
+# req 7: healthchecks gate startup ordering.
+name: rancho
+
+services:
+  rancho:
+    build:
+      context: .
+    # req 1: the API is the only service published to the host.
+    ports:
+      - "${RANCHO_HOST_PORT:-8000}:8000"
+    environment:
+      RANCHO_ENV: ${RANCHO_ENV:-development}
+      RANCHO_PUBLIC_BASE_URL: ${RANCHO_PUBLIC_BASE_URL:-}
+      # req 2: fixed internal provider address, not caller- or result-derived.
+      RANCHO_SEARCH_PROVIDER: searxng
+      RANCHO_SEARCH_BASE_URL: http://searxng:8080
+      RANCHO_SEARCH_API_KEY: ${RANCHO_SEARCH_API_KEY:-}
+      RANCHO_MAX_RESULTS: ${RANCHO_MAX_RESULTS:-10}
+      RANCHO_DATABASE_URL: postgresql://rancho:${POSTGRES_PASSWORD}@postgres:5432/rancho
+      RANCHO_REDIS_URL: redis://redis:6379/0
+      # req 5: LLM provider secrets are injected from the environment only.
+      RANCHO_LLM_PROVIDER: ${RANCHO_LLM_PROVIDER:-}
+      RANCHO_LLM_BASE_URL: ${RANCHO_LLM_BASE_URL:-}
+      RANCHO_LLM_MODEL: ${RANCHO_LLM_MODEL:-}
+      RANCHO_LLM_COMPLEX_MODEL: ${RANCHO_LLM_COMPLEX_MODEL:-}
+      RANCHO_LLM_API_KEY: ${RANCHO_LLM_API_KEY:-}
+    # req 7: start only after dependencies report healthy.
+    depends_on:
+      searxng:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=3).status==200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  # req 1/3: trusted internal metasearch; not published to the host.
+  searxng:
+    image: searxng/searxng:latest
+    environment:
+      # req 3/5: secret_key supplied from the environment, never committed.
+      SEARXNG_SECRET: ${SEARXNG_SECRET}
+      SEARXNG_BASE_URL: http://searxng:8080/
+    volumes:
+      - ./searxng:/etc/searxng:ro
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  # req 4: durable system of record; persistent named volume; not published.
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: rancho
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: rancho
+    volumes:
+      - rancho-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rancho -d rancho"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  # req 4: transient queue/event fan-out; ephemeral, no volume; not published.
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  # req 4: the only durable persistence in the stack.
+  rancho-pgdata:

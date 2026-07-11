@@ -1,0 +1,17 @@
+# @spec[RANCHO_DEPLOYMENT.md#requirements] req 5/6: never copy secrets, a real
+# .env, or local caches into the build context or image.
+.env
+.env.*
+!.env.example
+.git
+.gitignore
+.venv
+__pycache__
+*.py[cod]
+.pytest_cache
+.ruff_cache
+.coverage
+htmlcov
+.spec/credentials.json
+.codex
+tests

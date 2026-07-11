@@ -38,3 +38,32 @@ Copy `.env.example` to `.env` to configure local services. Do not commit `.env` 
 `RANCHO_SEARCH_BASE_URL` is a trusted internal SearXNG control-plane address (for example,
 `http://searxng:8080` in Docker Compose). It is configured by the operator and is never derived
 from a caller request or search result.
+
+## Running with Docker Compose
+
+The [`docker-compose.yml`](docker-compose.yml) stack runs the API together with its trusted
+internal dependencies, so `/v1/search` works end to end. It conforms to
+[`specs/RANCHO_DEPLOYMENT.md`](specs/RANCHO_DEPLOYMENT.md).
+
+```sh
+cp .env.example .env
+# Set at least SEARXNG_SECRET (openssl rand -hex 32) and POSTGRES_PASSWORD.
+docker compose up --build
+curl -s localhost:8000/ready
+curl -s -X POST localhost:8000/v1/search -H 'content-type: application/json' \
+  -d '{"query":"self-hosted search","max_results":5}'
+```
+
+Deployment facts (per `SECURITY_AND_SECRETS.md` requirement 7):
+
+| Field | Value |
+| --- | --- |
+| Service hostnames | `rancho`, `searxng`, `postgres`, `redis` (private Compose network) |
+| Published port | Only `rancho` → host `${RANCHO_HOST_PORT:-8000}`; SearXNG, Postgres, and Redis are not published |
+| Public base URL | `RANCHO_PUBLIC_BASE_URL` (front this service with your own TLS terminator) |
+| Auth mode | No inbound auth in this stack; SearXNG and the LLM are trusted internal services reached by service name. Optional `RANCHO_SEARCH_API_KEY` / `RANCHO_LLM_API_KEY` are sent only as outbound bearer tokens |
+| Secret/token source | Git-ignored `.env` (`SEARXNG_SECRET`, `POSTGRES_PASSWORD`, optional API keys); never committed and never baked into images |
+| Persistent volume | `rancho-pgdata` holds PostgreSQL data; Redis is ephemeral |
+
+`/ready` still verifies live SearXNG reachability, so a started-but-unhealthy provider yields the
+redacted `provider_unavailable` response rather than a false ready signal.
