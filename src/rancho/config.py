@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     search_api_key: str | None = None
     bing_api_key: str | None = None
     max_results: int = Field(default=10, ge=1, le=20)
+    search_enrich: bool = False
+    search_enrich_max_results: int = Field(default=3, ge=1, le=10)
     llm_provider: str | None = None
     llm_base_url: HttpUrl | None = None
     llm_api_key: str | None = None
@@ -77,6 +79,12 @@ class Settings(BaseSettings):
             and self.llm_base_url
             and self.llm_model
         )
+
+    @property
+    # @spec[RANCHO_SNIPPET_SYNTHESIS.md#requirements]
+    def enrich_is_enabled(self) -> bool:
+        """Whether LLM snippet enrichment is turned on and can run."""
+        return bool(self.search_enrich and self.llm_is_configured)
 
 
 @lru_cache

@@ -40,7 +40,7 @@ Goal: Implement the Parkour-compatible `/v1/search` endpoint using direct local 
 
 ### 1.5 Compatibility API (`POST /v1/search`)
 - [x] Implement the `POST /v1/search` endpoint conforming to the Parkour API spec.
-- [ ] Implement a fast LLM-driven snippet generator: extract a context-relevant excerpt from scraped page markdown for the requested query.
+- [x] Implement a fast LLM-driven snippet generator: extract a context-relevant excerpt from scraped page markdown for the requested query.
 - [x] Ensure 503 error handling returning `provider_unavailable` when LLM/Search is offline.
 
 ---

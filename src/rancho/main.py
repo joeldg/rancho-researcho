@@ -6,6 +6,9 @@ from fastapi import Depends, FastAPI, Response, status
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 from rancho.config import Settings, get_settings
+from rancho.enrich import SnippetEnricher
+from rancho.extract import WebContentFetcher
+from rancho.llm import get_local_llm_client
 from rancho.models import ErrorResponse, SearchRequest, SearchResponse
 from rancho.search import (
     ProviderUnavailableError,
@@ -13,6 +16,21 @@ from rancho.search import (
     SearchOrchestrator,
     get_search_adapter,
 )
+
+
+# @spec[RANCHO_SNIPPET_SYNTHESIS.md#requirements]
+def get_snippet_enricher(
+    settings: Settings = Depends(get_settings),
+) -> SnippetEnricher | None:
+    """Build the snippet enricher only when enrichment is enabled and possible."""
+    if not settings.enrich_is_enabled:
+        return None
+    llm = get_local_llm_client(settings)
+    if llm is None:
+        return None
+    return SnippetEnricher(
+        llm, WebContentFetcher(), settings.search_enrich_max_results
+    )
 
 app = FastAPI(
     title="Rancho Researcho",
@@ -79,6 +97,7 @@ def search(
     request: SearchRequest,
     settings: Settings = Depends(get_settings),
     adapter: SearchAdapter | SearchOrchestrator | None = Depends(get_search_adapter),
+    enricher: SnippetEnricher | None = Depends(get_snippet_enricher),
 ) -> SearchResponse | JSONResponse:
     """Serve a bounded search request or an explicit unavailable-provider error.
 
@@ -116,4 +135,6 @@ def search(
                 request_id=request_id,
             ).model_dump(mode="json"),
         )
+    if enricher is not None:
+        results, warnings = enricher.enrich(request.query, results, warnings)
     return SearchResponse(results=results, request_id=request_id, warnings=warnings)
