@@ -1,15 +1,18 @@
 """FastAPI entry point for Rancho Researcho."""
 
+import asyncio
+import json
+from collections.abc import AsyncIterator
 from uuid import UUID, uuid4
 
 from fastapi import Depends, FastAPI, Header, Response, status
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from rancho.config import Settings, get_settings
 from rancho.db import get_session_factory
-from rancho.db_models import Evidence, ResearchTask
+from rancho.db_models import TERMINAL_STATES, Evidence, ResearchTask, TaskEvent
 from rancho.enrich import SnippetEnricher
 from rancho.extract import WebContentFetcher
 from rancho.llm import get_local_llm_client
@@ -262,3 +265,120 @@ async def get_task(
             created_at=task.created_at,
             updated_at=task.updated_at,
         )
+
+
+# @spec[RANCHO_ASYNC_RESEARCH.md#sse-and-events]
+@app.get(
+    "/v1/tasks/{task_id}/events",
+    response_model=None,
+    responses={
+        404: {"model": ErrorResponse},
+        410: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+async def stream_task_events(
+    task_id: UUID,
+    session_factory: async_sessionmaker | None = Depends(get_session_factory),
+    last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
+) -> StreamingResponse | JSONResponse:
+    """Replay durable task events and poll until the task reaches a terminal state."""
+    request_id = f"req_{uuid4().hex}"
+    if session_factory is None:
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content=_error(
+                "database_unavailable", "No durable store is configured.", request_id
+            ),
+        )
+    after_sequence = _parse_last_event_id(last_event_id)
+    if after_sequence is None:
+        return JSONResponse(
+            status_code=status.HTTP_410_GONE,
+            content=_error(
+                "event_history_expired",
+                "The requested event history is unavailable.",
+                request_id,
+            ),
+        )
+    async with session_factory() as session:
+        task = await session.get(ResearchTask, task_id)
+        if task is None:
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content=_error("task_not_found", "No such task.", request_id),
+            )
+        if not await _is_replay_point_available(session, task_id, after_sequence):
+            return JSONResponse(
+                status_code=status.HTTP_410_GONE,
+                content=_error(
+                    "event_history_expired",
+                    "The requested event history is unavailable.",
+                    request_id,
+                ),
+            )
+    return StreamingResponse(
+        _event_stream(session_factory, task_id, after_sequence),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+def _parse_last_event_id(value: str | None) -> int | None:
+    """Parse a non-negative durable event sequence or return an invalid marker."""
+    if value is None:
+        return 0
+    try:
+        sequence = int(value)
+    except ValueError:
+        return None
+    return sequence if sequence >= 0 else None
+
+
+async def _is_replay_point_available(
+    session, task_id: UUID, after_sequence: int
+) -> bool:
+    """Require an explicit retained event for nonzero replay positions."""
+    if after_sequence == 0:
+        return True
+    result = await session.execute(
+        select(TaskEvent.id).where(
+            TaskEvent.task_id == task_id, TaskEvent.sequence == after_sequence
+        )
+    )
+    return result.scalar_one_or_none() is not None
+
+
+async def _event_stream(
+    session_factory: async_sessionmaker, task_id: UUID, after_sequence: int
+) -> AsyncIterator[str]:
+    """Yield ordered durable events after one sequence, then close at terminal state."""
+    sequence = after_sequence
+    while True:
+        async with session_factory() as session:
+            result = await session.execute(
+                select(TaskEvent)
+                .where(TaskEvent.task_id == task_id, TaskEvent.sequence > sequence)
+                .order_by(TaskEvent.sequence)
+            )
+            events = result.scalars().all()
+            task = await session.get(ResearchTask, task_id)
+        for event in events:
+            sequence = event.sequence
+            yield _format_sse_event(event)
+        if task is None or task.status in TERMINAL_STATES:
+            return
+        await asyncio.sleep(0.2)
+
+
+def _format_sse_event(event: TaskEvent) -> str:
+    """Encode one redacted durable event using the SSE wire format."""
+    payload = {
+        "task_id": str(event.task_id),
+        "sequence": event.sequence,
+        "timestamp": event.created_at.isoformat(),
+        "stage": event.stage,
+        "data": event.payload,
+    }
+    data = json.dumps(payload, separators=(",", ":"), default=str)
+    return f"id: {event.sequence}\nevent: {event.type.value}\ndata: {data}\n\n"

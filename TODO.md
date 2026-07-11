@@ -74,7 +74,7 @@ Goal: Establish the worker queue, database schemas, stateful agent research loop
 - [ ] Ensure the final synthesis cannot cite any URL absent from the `Evidence` store.
 
 ### 2.4 Server-Sent Events (SSE) Streaming
-- [ ] Create SSE endpoint `GET /v1/tasks/{task_id}/events` supporting connection recovery (`Last-Event-ID`).
+- [x] Create SSE endpoint `GET /v1/tasks/{task_id}/events` supporting connection recovery (`Last-Event-ID`).
 - [ ] Emit granular events during execution: `task.created`, `search.completed`, `evidence.extracted`, `claim.verified`, `progress`, and terminal states.
 
 ---

@@ -54,6 +54,9 @@ curl -sS -X POST http://127.0.0.1:8000/v1/research \
   -d '{"objective":"Compare solid-state battery approaches","max_sources":5}'
 
 curl -sS http://127.0.0.1:8000/v1/tasks/<task_id>
+
+# Replay ordered durable lifecycle events. Use -N so curl does not buffer SSE.
+curl -NsS http://127.0.0.1:8000/v1/tasks/<task_id>/events
 ```
 
 The worker now performs one bounded search-and-fetch pass. The final status is still `partial`
@@ -61,6 +64,13 @@ because planning, claim verification, and synthesis are the next slices. A posit
 `evidence_count` means safely fetched markdown was retained; a value of zero can be an honest
 result when search has no usable results or every URL is unavailable. Paste both JSON responses
 here and I can verify the durable lifecycle is working.
+
+To reconnect after an event, replay only newer events with its SSE ID:
+
+```sh
+curl -NsS http://127.0.0.1:8000/v1/tasks/<task_id>/events \
+  -H 'Last-Event-ID: 3'
+```
 
 ## Running with Docker Compose
 
