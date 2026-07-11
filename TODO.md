@@ -30,13 +30,13 @@ Goal: Implement the Parkour-compatible `/v1/search` endpoint using direct local 
 - [x] Create search orchestrator that executes queries across active adapters, deduplicates URLs, and normalizes result schema.
 
 ### 1.4 Web Content Extraction (Scraper)
-- [ ] Implement HTTP client for direct URL fetching with:
-  - [ ] Enforced outbound SSRF blocker (vetting resolved IPs against private/loopback subnets).
-  - [ ] User-agent rotation, timeout limits, and content-length cap.
-  - [ ] Redirect loop detection.
-- [ ] Implement HTML-to-Markdown parser (using `BeautifulSoup` + `markdownify`) that:
-  - [ ] Drops scripts, styles, forms, navigation headers, footers, and sidebars.
-  - [ ] Preserves links, tables, and headers to retain context for the LLM.
+- [x] Implement HTTP client for direct URL fetching with:
+  - [x] Enforced outbound SSRF blocker (vetting resolved IPs against private/loopback subnets).
+  - [x] User-agent rotation, timeout limits, and content-length cap.
+  - [x] Redirect loop detection.
+- [x] Implement HTML-to-Markdown parser (using `BeautifulSoup` + `markdownify`) that:
+  - [x] Drops scripts, styles, forms, navigation headers, footers, and sidebars.
+  - [x] Preserves links, tables, and headers to retain context for the LLM.
 
 ### 1.5 Compatibility API (`POST /v1/search`)
 - [x] Implement the `POST /v1/search` endpoint conforming to the Parkour API spec.
