@@ -6,7 +6,7 @@ from typing import Optional
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
 
-# @spec[RANCHO_API_SECURITY.md#requirements]
+# @spec[RANCHO_API_SECURITY.md#http-contract]
 class SearchRequest(BaseModel):
     """A bounded Parkour-compatible search request."""
 
@@ -16,7 +16,7 @@ class SearchRequest(BaseModel):
     max_results: int = Field(default=5, ge=1, le=20)
 
 
-# @spec[RANCHO_API_SECURITY.md#requirements]
+# @spec[RANCHO_API_SECURITY.md#http-contract]
 class SearchResult(BaseModel):
     """One normalized and evidence-bearing search result."""
 
@@ -28,7 +28,7 @@ class SearchResult(BaseModel):
     retrieved_at: datetime
 
 
-# @spec[RANCHO_API_SECURITY.md#requirements]
+# @spec[RANCHO_API_SECURITY.md#http-contract]
 class SearchResponse(BaseModel):
     """Successful response accepted by Parkour's search integration."""
 
@@ -38,7 +38,7 @@ class SearchResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
-# @spec[RANCHO_API_SECURITY.md#requirements]
+# @spec[RANCHO_API_SECURITY.md#http-contract]
 class ErrorDetail(BaseModel):
     """Machine-readable error payload."""
 
@@ -46,7 +46,7 @@ class ErrorDetail(BaseModel):
     message: str
 
 
-# @spec[RANCHO_API_SECURITY.md#requirements]
+# @spec[RANCHO_API_SECURITY.md#http-contract]
 class ErrorResponse(BaseModel):
     """Response returned when a provider cannot serve a request."""
 

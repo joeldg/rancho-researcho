@@ -7,7 +7,7 @@ from pydantic import Field, HttpUrl
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-# @spec[RANCHO_API_SECURITY.md#requirements]
+# @spec[RANCHO_API_SECURITY.md#provider-configuration-and-searxng]
 class Settings(BaseSettings):
     """Runtime settings for the Rancho API."""
 
@@ -25,14 +25,14 @@ class Settings(BaseSettings):
     max_results: int = Field(default=10, ge=1, le=20)
 
     @property
-    # @spec[RANCHO_API_SECURITY.md#requirements]
+    # @spec[RANCHO_API_SECURITY.md#provider-configuration-and-searxng]
     def search_is_configured(self) -> bool:
         """Whether a search provider has the minimum adapter configuration."""
-        return bool(self.search_provider and self.search_base_url)
+        return bool(self.search_provider == "searxng" and self.search_base_url)
 
 
 @lru_cache
-# @spec[RANCHO_API_SECURITY.md#requirements]
+# @spec[RANCHO_API_SECURITY.md#provider-configuration-and-searxng]
 def get_settings() -> Settings:
     """Return cached validated application settings."""
     return Settings()

@@ -17,3 +17,8 @@ uv run uvicorn rancho.main:app --reload
 ```
 
 Copy `.env.example` to `.env` to configure local services. Do not commit `.env` or API keys.
+
+`RANCHO_PUBLIC_BASE_URL` is the public HTTPS address of Rancho. In contrast,
+`RANCHO_SEARCH_BASE_URL` is a trusted internal SearXNG control-plane address (for example,
+`http://searxng:8080` in Docker Compose). It is configured by the operator and is never derived
+from a caller request or search result.
