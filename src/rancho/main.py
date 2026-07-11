@@ -7,7 +7,12 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 
 from rancho.config import Settings, get_settings
 from rancho.models import ErrorResponse, SearchRequest, SearchResponse
-from rancho.search import ProviderUnavailableError, SearchAdapter, get_search_adapter
+from rancho.search import (
+    ProviderUnavailableError,
+    SearchAdapter,
+    SearchOrchestrator,
+    get_search_adapter,
+)
 
 app = FastAPI(
     title="Rancho Researcho",
@@ -27,7 +32,7 @@ def health() -> dict[str, str]:
 @app.get("/ready")
 def ready(
     settings: Settings = Depends(get_settings),
-    adapter: SearchAdapter | None = Depends(get_search_adapter),
+    adapter: SearchAdapter | SearchOrchestrator | None = Depends(get_search_adapter),
 ) -> Response:
     """Report whether a search adapter is configured for traffic."""
     if not settings.search_is_configured or adapter is None:
@@ -73,7 +78,7 @@ def metrics(settings: Settings = Depends(get_settings)) -> str:
 def search(
     request: SearchRequest,
     settings: Settings = Depends(get_settings),
-    adapter: SearchAdapter | None = Depends(get_search_adapter),
+    adapter: SearchAdapter | SearchOrchestrator | None = Depends(get_search_adapter),
 ) -> SearchResponse | JSONResponse:
     """Serve a bounded search request or an explicit unavailable-provider error.
 
@@ -94,7 +99,12 @@ def search(
         )
 
     try:
-        results = adapter.search(request.query, request.max_results)
+        if isinstance(adapter, SearchOrchestrator):
+            outcome = adapter.run(request.query, request.max_results)
+            results, warnings = outcome.results, outcome.warnings
+        else:
+            results = adapter.search(request.query, request.max_results)
+            warnings = []
     except ProviderUnavailableError:
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -106,4 +116,4 @@ def search(
                 request_id=request_id,
             ).model_dump(mode="json"),
         )
-    return SearchResponse(results=results, request_id=request_id)
+    return SearchResponse(results=results, request_id=request_id, warnings=warnings)

@@ -24,10 +24,10 @@ Goal: Implement the Parkour-compatible `/v1/search` endpoint using direct local 
 - [x] Implement fallbacks for when the local model is overloaded or out of memory.
 
 ### 1.3 Raw Search Adapters
-- [ ] Implement **DuckDuckGo** raw search adapter (scraping HTML or using direct search libs).
+- [x] Implement **DuckDuckGo** raw search adapter (scraping HTML or using direct search libs).
 - [x] Implement **SearXNG** JSON API adapter.
-- [ ] Implement **Google Custom Search / Bing Search API** adapters as optional developer overrides.
-- [ ] Create search orchestrator that executes queries across active adapters, deduplicates URLs, and normalizes result schema.
+- [x] Implement **Google Custom Search / Bing Search API** adapters as optional developer overrides. (Bing delivered; Google deferred — its key-in-URL auth conflicts with the header-only secret rule in RANCHO_SEARCH_ORCHESTRATION req 3.)
+- [x] Create search orchestrator that executes queries across active adapters, deduplicates URLs, and normalizes result schema.
 
 ### 1.4 Web Content Extraction (Scraper)
 - [ ] Implement HTTP client for direct URL fetching with:

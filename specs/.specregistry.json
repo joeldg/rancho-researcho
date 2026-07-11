@@ -2,7 +2,7 @@
   "project_type": "SaaS Backend API",
   "project": "github.com/joeldg/rancho-researcho",
   "channel": "stable",
-  "fetched_at": "2026-07-11T04:49:01.309Z",
+  "fetched_at": "2026-07-11T04:57:35.846Z",
   "specs": [
     {
       "filename": "AGENT_OPERATING_RULES.md",
@@ -115,8 +115,15 @@
       "project_type": "github.com/joeldg/rancho-researcho",
       "scope": "project",
       "sha256": "eed92855d479f42b03866a66db7e4dde699f3e332b22492152e8ad9ca6076b9d"
+    },
+    {
+      "filename": "RANCHO_SEARCH_ORCHESTRATION.md",
+      "version": "1.0.0",
+      "project_type": "github.com/joeldg/rancho-researcho",
+      "scope": "project",
+      "sha256": "9b4e0ec1fab2cc467c559b7d59934d724cd67c6dc0d6cb00f2fc40ed48bd509b"
     }
   ],
-  "signature": "E7wBayRqDm0j699WCGIZ4/KGWwys+Iuq+DcrtVcYdtK6ChHTfz0F61UfEhzSLCRUzf5aysHR0yCRBtAw0FlHCQ==",
+  "signature": "kJWumgRE2YbK4vqEzzNY/vs2psYTrgdCcTdXAADbUsd+e9lD5RjG8haGruzZnD5DjrVY3/202ct+DTzVVY4kAA==",
   "signature_alg": "ed25519"
 }
