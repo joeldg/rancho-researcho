@@ -1,0 +1,45 @@
+{
+  "provider": "google-styleguide",
+  "fetched_at": "2026-07-11T02:20:42.883Z",
+  "detected_languages": [
+    "Markdown"
+  ],
+  "selected": [
+    {
+      "id": "docguide",
+      "title": "Google Documentation Guide",
+      "path": ".spec/styleguides/google-documentation-guide.md",
+      "sources": [
+        "https://google.github.io/styleguide/docguide/",
+        "https://google.github.io/styleguide/docguide/style.html",
+        "https://google.github.io/styleguide/docguide/best_practices.html",
+        "https://google.github.io/styleguide/docguide/READMEs.html",
+        "https://google.github.io/styleguide/docguide/philosophy.html"
+      ]
+    },
+    {
+      "id": "python",
+      "title": "Google Python Style Guide",
+      "path": ".spec/styleguides/google-python-style-guide.md",
+      "sources": [
+        "https://google.github.io/styleguide/pyguide.html"
+      ]
+    },
+    {
+      "id": "html-css",
+      "title": "Google HTML/CSS Style Guide",
+      "path": ".spec/styleguides/google-html-css-style-guide.md",
+      "sources": [
+        "https://google.github.io/styleguide/htmlcssguide.html"
+      ]
+    },
+    {
+      "id": "shell",
+      "title": "Google Shell Style Guide",
+      "path": ".spec/styleguides/google-shell-style-guide.md",
+      "sources": [
+        "https://google.github.io/styleguide/shellguide.html"
+      ]
+    }
+  ]
+}
