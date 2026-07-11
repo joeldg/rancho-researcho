@@ -32,6 +32,18 @@ class Settings(BaseSettings):
     llm_api_key: str | None = None
     llm_model: str | None = None
     llm_complex_model: str | None = None
+    database_url: str | None = None
+    redis_url: str | None = None
+
+    # @spec[RANCHO_ASYNC_RESEARCH.md#architecture-and-storage]
+    def async_database_url(self) -> str | None:
+        """Return the durable-store URL with an async driver, if configured."""
+        if not self.database_url:
+            return None
+        for prefix in ("postgresql://", "postgres://"):
+            if self.database_url.startswith(prefix):
+                return "postgresql+asyncpg://" + self.database_url[len(prefix):]
+        return self.database_url
 
     # @spec[RANCHO_SEARCH_ORCHESTRATION.md#requirements]
     def active_search_providers(self) -> list[str]:
