@@ -18,10 +18,10 @@ Goal: Implement the Parkour-compatible `/v1/search` endpoint using direct local 
 - [x] Configure configuration loader (`pydantic-settings`) reading from `.env`.
 
 ### 1.2 Local LLM Client Wrapper
-- [ ] Write client wrapper for OpenAI-compatible REST APIs (Ollama/vLLM).
-- [ ] Implement query timeout and retry decorator with exponential backoff.
-- [ ] Add support for selecting specific local models (e.g., `llama3.1:8b`, `mistral:7b`) based on query complexity.
-- [ ] Implement fallbacks for when the local model is overloaded or out of memory.
+- [x] Write client wrapper for OpenAI-compatible REST APIs (Ollama/vLLM).
+- [x] Implement query timeout and retry decorator with exponential backoff.
+- [x] Add support for selecting specific local models (e.g., `llama3.1:8b`, `mistral:7b`) based on query complexity.
+- [x] Implement fallbacks for when the local model is overloaded or out of memory.
 
 ### 1.3 Raw Search Adapters
 - [ ] Implement **DuckDuckGo** raw search adapter (scraping HTML or using direct search libs).

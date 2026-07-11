@@ -14,6 +14,9 @@ The Phase 1 compatibility foundation is available now:
 - `/health`, `/ready`, and `/metrics` expose process and provider state without secrets.
 - An unconfigured or failed provider returns a redacted HTTP 503 `provider_unavailable` response;
   Rancho never invents search results.
+- The local Ollama/vLLM client uses a fixed OpenAI-compatible completion endpoint, bounded retries,
+  internally selected models, and typed unavailable failures. It is available for later synthesis
+  stages but is not yet part of the synchronous search response.
 
 DuckDuckGo, local LLM synthesis, extraction/crawling, and asynchronous research tasks are still
 in development. See [TODO.md](TODO.md) for the current delivery checklist.

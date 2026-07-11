@@ -26,8 +26,8 @@ def test_health_is_available() -> None:
 
 # @spec[RANCHO_API_SECURITY.md#http-contract]
 def test_ready_is_unavailable_without_search_provider(monkeypatch) -> None:
-    monkeypatch.delenv("RANCHO_SEARCH_PROVIDER", raising=False)
-    monkeypatch.delenv("RANCHO_SEARCH_BASE_URL", raising=False)
+    monkeypatch.setenv("RANCHO_SEARCH_PROVIDER", "disabled")
+    monkeypatch.setenv("RANCHO_SEARCH_BASE_URL", "http://disabled.invalid")
     reset_settings()
 
     response = client.get("/ready")
@@ -38,8 +38,8 @@ def test_ready_is_unavailable_without_search_provider(monkeypatch) -> None:
 
 # @spec[RANCHO_API_SECURITY.md#http-contract]
 def test_metrics_exposes_provider_configuration(monkeypatch) -> None:
-    monkeypatch.delenv("RANCHO_SEARCH_PROVIDER", raising=False)
-    monkeypatch.delenv("RANCHO_SEARCH_BASE_URL", raising=False)
+    monkeypatch.setenv("RANCHO_SEARCH_PROVIDER", "disabled")
+    monkeypatch.setenv("RANCHO_SEARCH_BASE_URL", "http://disabled.invalid")
     reset_settings()
 
     response = client.get("/metrics")
@@ -50,8 +50,8 @@ def test_metrics_exposes_provider_configuration(monkeypatch) -> None:
 
 # @spec[RANCHO_API_SECURITY.md#acceptance-evidence]
 def test_search_never_fabricates_results_without_provider(monkeypatch) -> None:
-    monkeypatch.delenv("RANCHO_SEARCH_PROVIDER", raising=False)
-    monkeypatch.delenv("RANCHO_SEARCH_BASE_URL", raising=False)
+    monkeypatch.setenv("RANCHO_SEARCH_PROVIDER", "disabled")
+    monkeypatch.setenv("RANCHO_SEARCH_BASE_URL", "http://disabled.invalid")
     reset_settings()
 
     response = client.post(
