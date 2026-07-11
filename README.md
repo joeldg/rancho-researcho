@@ -5,6 +5,19 @@ Rancho Researcho is an autonomous, self-hosted web-research agent. It exposes a 
 The detailed project specification is in
 [PROJECT_DESCRIPTION.md](PROJECT_DESCRIPTION.md). It defines the core agent components, the normalized contract, streaming events, security policy, anti-hallucination requirements, configuration, milestones, and acceptance criteria.
 
+## Current capability
+
+The Phase 1 compatibility foundation is available now:
+
+- `POST /v1/search` and `/search` accept bounded Parkour-compatible search requests.
+- A configured, trusted internal SearXNG provider supplies normalized, deduplicated results.
+- `/health`, `/ready`, and `/metrics` expose process and provider state without secrets.
+- An unconfigured or failed provider returns a redacted HTTP 503 `provider_unavailable` response;
+  Rancho never invents search results.
+
+DuckDuckGo, local LLM synthesis, extraction/crawling, and asynchronous research tasks are still
+in development. See [TODO.md](TODO.md) for the current delivery checklist.
+
 ## Local development
 
 The initial scaffold deliberately exposes an honest unavailable-provider response until a

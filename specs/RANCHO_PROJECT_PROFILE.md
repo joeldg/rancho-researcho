@@ -26,22 +26,28 @@ fabricated research results.
 5. Local LLMs and search engines are configuration-selected components. Their credentials remain
    in environment or secret-manager inputs and are never returned by API, metrics, logs, or
    stored task results.
-6. PostgreSQL, Redis, durable tasks, URL extraction, crawling, deep research, FindAll, and
-   monitoring are later milestones. The SearXNG slice does not fetch result URLs.
-7. Contract tests cover health, readiness, metrics, input validation, unavailable-provider
-   behavior, successful normalized SearXNG results, and the control-plane/untrusted URL boundary.
+6. Phase 2 uses PostgreSQL for durable task/evidence/claim/event records, SQLAlchemy 2 plus
+   Alembic for migrations, Redis plus `arq` for worker execution and live event fan-out, and SSE
+   for task progress. PostgreSQL remains authoritative when Redis is unavailable or expires data.
+7. URL extraction, crawling, deep LLM research behavior, FindAll, monitors, and webhooks follow
+   after the durable task/event foundation. Phase 2 may use a bounded worker stub, but does not
+   claim completed research until evidence and claims are retained.
+8. Contract tests cover health, readiness, metrics, input validation, unavailable-provider
+   behavior, successful normalized SearXNG results, the control-plane/untrusted URL boundary,
+   task lifecycle, event replay, and evidence provenance.
 
 ## Non-Goals
 
-This profile does not define production authentication policy, worker queues, browser automation,
-database schemas, generic outbound proxying, or the full research loop.
+This profile does not define production tenant authentication policy, browser automation, generic
+outbound proxying, or the full research loop.
 
 ## Acceptance Evidence
 
 - A configured SearXNG fixture returns bounded, deduplicated results at `/v1/search`.
 - A missing or failed provider returns 503 `provider_unavailable` without fabricated results.
-- Tests prove caller-controlled URLs cannot redirect the SearXNG adapter to private services.
-- Deployment documentation distinguishes the public HTTPS API from the trusted internal provider.
+- A task lifecycle test demonstrates durable state, cancellation, retry, and SSE replay.
+- Deployment documentation distinguishes the public HTTPS API, internal SearXNG provider,
+  PostgreSQL system of record, and Redis transient-worker/event role.
 
 ## Token Budget Class
 
@@ -50,6 +56,7 @@ Project contract.
 ## Related Specs
 
 - `RANCHO_API_SECURITY.md`
+- `RANCHO_ASYNC_RESEARCH.md`
 - `PROJECT_DESCRIPTION.md`
 - `GLOBAL_SECURITY.md`
 - `CODING_STANDARDS.md`
@@ -57,7 +64,7 @@ Project contract.
 
 ## AI Agent Directives
 
-Treat SearXNG as a configuration-controlled provider, never as an arbitrary URL proxy. Keep
-untrusted result/extraction URLs on the separate validation path defined by the API security
-contract.
+Treat SearXNG as a configuration-controlled provider and PostgreSQL as durable research truth.
+Keep untrusted result/extraction URLs on the separate validation path defined by the API security
+contract; do not make Redis the sole source of task, evidence, claim, or terminal event state.
 
