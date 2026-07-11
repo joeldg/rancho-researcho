@@ -1,7 +1,6 @@
 """Stable HTTP models for the Phase 1 search compatibility API."""
 
 from datetime import datetime
-from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
@@ -24,7 +23,7 @@ class SearchResult(BaseModel):
     title: str = Field(min_length=1, max_length=500)
     snippet: str = Field(min_length=1, max_length=2_000)
     source_id: str
-    published_at: Optional[datetime] = None
+    published_at: datetime | None = None
     retrieved_at: datetime
 
 

@@ -9,39 +9,39 @@ This document outlines the development phases, technical hurdles, and step-by-st
 Goal: Implement the Parkour-compatible `/v1/search` endpoint using direct local search wrappers, a local LLM integration, and raw web scraping.
 
 ### 1.1 Project Setup & Local Infrastructure
-- [ ] Initialize Python FastAPI project with Poetry/pipenv/uv.
-- [ ] Create Docker Compose file with dependencies:
-  - [ ] PostgreSQL (for durable task and evidence metadata).
-  - [ ] Redis (for task queuing and event storage).
-  - [ ] SearXNG (local metasearch engine for private queries).
-- [ ] Set up basic health, readiness, and metrics routes (`/health`, `/ready`, `/metrics`).
-- [ ] Configure configuration loader (`pydantic-settings`) reading from `.env`.
+- [x] Initialize Python FastAPI project with Poetry/pipenv/uv.
+- [x] Create Docker Compose file with dependencies:
+  - [x] PostgreSQL (for durable task and evidence metadata).
+  - [x] Redis (for task queuing and event storage).
+  - [x] SearXNG (local metasearch engine for private queries).
+- [x] Set up basic health, readiness, and metrics routes (`/health`, `/ready`, `/metrics`).
+- [x] Configure configuration loader (`pydantic-settings`) reading from `.env`.
 
 ### 1.2 Local LLM Client Wrapper
-- [ ] Write client wrapper for OpenAI-compatible REST APIs (Ollama/vLLM).
-- [ ] Implement query timeout and retry decorator with exponential backoff.
-- [ ] Add support for selecting specific local models (e.g., `llama3.1:8b`, `mistral:7b`) based on query complexity.
-- [ ] Implement fallbacks for when the local model is overloaded or out of memory.
+- [x] Write client wrapper for OpenAI-compatible REST APIs (Ollama/vLLM).
+- [x] Implement query timeout and retry decorator with exponential backoff.
+- [x] Add support for selecting specific local models (e.g., `llama3.1:8b`, `mistral:7b`) based on query complexity.
+- [x] Implement fallbacks for when the local model is overloaded or out of memory.
 
 ### 1.3 Raw Search Adapters
-- [ ] Implement **DuckDuckGo** raw search adapter (scraping HTML or using direct search libs).
-- [ ] Implement **SearXNG** JSON API adapter.
-- [ ] Implement **Google Custom Search / Bing Search API** adapters as optional developer overrides.
-- [ ] Create search orchestrator that executes queries across active adapters, deduplicates URLs, and normalizes result schema.
+- [x] Implement **DuckDuckGo** raw search adapter (scraping HTML or using direct search libs).
+- [x] Implement **SearXNG** JSON API adapter.
+- [x] Implement **Google Custom Search / Bing Search API** adapters as optional developer overrides. (Bing delivered; Google deferred — its key-in-URL auth conflicts with the header-only secret rule in RANCHO_SEARCH_ORCHESTRATION req 3.)
+- [x] Create search orchestrator that executes queries across active adapters, deduplicates URLs, and normalizes result schema.
 
 ### 1.4 Web Content Extraction (Scraper)
-- [ ] Implement HTTP client for direct URL fetching with:
-  - [ ] Enforced outbound SSRF blocker (vetting resolved IPs against private/loopback subnets).
-  - [ ] User-agent rotation, timeout limits, and content-length cap.
-  - [ ] Redirect loop detection.
-- [ ] Implement HTML-to-Markdown parser (using `BeautifulSoup` + `markdownify`) that:
-  - [ ] Drops scripts, styles, forms, navigation headers, footers, and sidebars.
-  - [ ] Preserves links, tables, and headers to retain context for the LLM.
+- [x] Implement HTTP client for direct URL fetching with:
+  - [x] Enforced outbound SSRF blocker (vetting resolved IPs against private/loopback subnets).
+  - [x] User-agent rotation, timeout limits, and content-length cap.
+  - [x] Redirect loop detection.
+- [x] Implement HTML-to-Markdown parser (using `BeautifulSoup` + `markdownify`) that:
+  - [x] Drops scripts, styles, forms, navigation headers, footers, and sidebars.
+  - [x] Preserves links, tables, and headers to retain context for the LLM.
 
 ### 1.5 Compatibility API (`POST /v1/search`)
-- [ ] Implement the `POST /v1/search` endpoint conforming to the Parkour API spec.
+- [x] Implement the `POST /v1/search` endpoint conforming to the Parkour API spec.
 - [ ] Implement a fast LLM-driven snippet generator: extract a context-relevant excerpt from scraped page markdown for the requested query.
-- [ ] Ensure 503 error handling returning `provider_unavailable` when LLM/Search is offline.
+- [x] Ensure 503 error handling returning `provider_unavailable` when LLM/Search is offline.
 
 ---
 

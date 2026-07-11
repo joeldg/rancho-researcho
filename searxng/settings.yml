@@ -1,0 +1,18 @@
+# @spec[RANCHO_DEPLOYMENT.md#requirements] req 3: enable the JSON response
+# format that SearxngSearchAdapter requires. secret_key is intentionally NOT
+# set here; it is supplied only through the SEARXNG_SECRET environment variable
+# (req 5), so no secret is ever committed. This file layers on the image's
+# built-in defaults.
+use_default_settings: true
+
+search:
+  # SearxngSearchAdapter requests format=json; it must be allowed.
+  formats:
+    - html
+    - json
+
+server:
+  # Trusted internal service: the API calls it server-to-server, so the bot
+  # limiter (which would reject non-browser JSON clients) is disabled.
+  limiter: false
+  image_proxy: false
