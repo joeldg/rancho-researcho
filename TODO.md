@@ -54,9 +54,11 @@ Goal: Establish the worker queue, database schemas, stateful agent research loop
   - [x] `ResearchTask` (tracks task metadata, state, input query, models used).
   - [x] `Evidence` (stores canonical URLs, scraped markdown content, and hash).
   - [x] `Claim` (contains extracted claims and links to source evidence).
-- [ ] Integrate background worker queue (e.g., using `arq`, `Celery`, or `rq`) running on Redis.
+- [x] Integrate background worker queue (e.g., using `arq`, `Celery`, or `rq`) running on Redis.
+- [x] Add idempotent cancellation and bounded retry controls with durable events.
 
 ### 2.2 Deep Research Agent Loop
+- [x] Deliver a bounded single-pass search and safe evidence-collection worker stage with durable events.
 - [ ] Implement the stateful **Research Loop** driven by the local LLM:
   1. **Planning**: LLM expands the objective into an initial list of target search queries.
   2. **Search & Crawl**: Execute queries and fetch top result URLs.
@@ -73,7 +75,7 @@ Goal: Establish the worker queue, database schemas, stateful agent research loop
 - [ ] Ensure the final synthesis cannot cite any URL absent from the `Evidence` store.
 
 ### 2.4 Server-Sent Events (SSE) Streaming
-- [ ] Create SSE endpoint `GET /v1/tasks/{task_id}/events` supporting connection recovery (`Last-Event-ID`).
+- [x] Create SSE endpoint `GET /v1/tasks/{task_id}/events` supporting connection recovery (`Last-Event-ID`).
 - [ ] Emit granular events during execution: `task.created`, `search.completed`, `evidence.extracted`, `claim.verified`, `progress`, and terminal states.
 
 ---

@@ -1,14 +1,25 @@
 """FastAPI entry point for Rancho Researcho."""
 
+import asyncio
+import json
+from collections.abc import AsyncIterator
 from uuid import UUID, uuid4
 
 from fastapi import Depends, FastAPI, Header, Response, status
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from rancho.config import Settings, get_settings
 from rancho.db import get_session_factory
-from rancho.db_models import ResearchTask
+from rancho.db_models import (
+    TERMINAL_STATES,
+    EventType,
+    Evidence,
+    ResearchTask,
+    TaskEvent,
+    TaskStatus,
+)
 from rancho.enrich import SnippetEnricher
 from rancho.extract import WebContentFetcher
 from rancho.llm import get_local_llm_client
@@ -20,7 +31,7 @@ from rancho.models import (
     SearchRequest,
     SearchResponse,
 )
-from rancho.queue import enqueue_research_task
+from rancho.queue import QueueUnavailableError, enqueue_research_task
 from rancho.research import ResearchConflictError, create_or_get_research_task
 from rancho.search import (
     ProviderUnavailableError,
@@ -51,9 +62,8 @@ def get_snippet_enricher(
     llm = get_local_llm_client(settings)
     if llm is None:
         return None
-    return SnippetEnricher(
-        llm, WebContentFetcher(), settings.search_enrich_max_results
-    )
+    return SnippetEnricher(llm, WebContentFetcher(), settings.search_enrich_max_results)
+
 
 app = FastAPI(
     title="Rancho Researcho",
@@ -200,7 +210,17 @@ async def create_research(
             )
         task_id, task_status = task.id, task.status.value
     # Enqueue only after the creation transaction has committed.
-    await enqueue_research_task(task_id)
+    try:
+        await enqueue_research_task(task_id, settings.redis_url)
+    except QueueUnavailableError:
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content=_error(
+                "queue_unavailable",
+                "The task was stored but could not be dispatched.",
+                request_id,
+            ),
+        )
     status_url = _status_url(settings, task_id)
     body = ResearchTaskAccepted(
         task_id=str(task_id), status=task_status, status_url=status_url
@@ -238,10 +258,273 @@ async def get_task(
                 status_code=status.HTTP_404_NOT_FOUND,
                 content=_error("task_not_found", "No such task.", request_id),
             )
+        count_result = await session.execute(
+            select(func.count())
+            .select_from(Evidence)
+            .where(Evidence.task_id == task.id)
+        )
         return ResearchTaskState(
             task_id=str(task.id),
             status=task.status.value,
             attempt=task.attempt,
+            evidence_count=int(count_result.scalar_one()),
             created_at=task.created_at,
             updated_at=task.updated_at,
         )
+
+
+# @spec[RANCHO_ASYNC_RESEARCH.md#task-lifecycle-and-worker-behavior]
+@app.post("/v1/tasks/{task_id}/cancel", responses={404: {"model": ErrorResponse}})
+async def cancel_task(
+    task_id: UUID,
+    settings: Settings = Depends(get_settings),
+    session_factory: async_sessionmaker | None = Depends(get_session_factory),
+) -> JSONResponse:
+    """Request cancellation idempotently, retaining any evidence already stored."""
+    request_id = f"req_{uuid4().hex}"
+    if session_factory is None:
+        return JSONResponse(
+            status_code=503,
+            content=_error(
+                "database_unavailable", "No durable store is configured.", request_id
+            ),
+        )
+    should_enqueue = False
+    async with session_factory() as session:
+        task = await session.get(ResearchTask, task_id, with_for_update=True)
+        if task is None:
+            return JSONResponse(
+                status_code=404,
+                content=_error("task_not_found", "No such task.", request_id),
+            )
+        if task.status in {TaskStatus.queued, TaskStatus.running}:
+            task.status = TaskStatus.cancel_requested
+            await _append_task_event(
+                session,
+                task.id,
+                EventType.progress,
+                "cancellation",
+                {"status": "cancel_requested"},
+            )
+            await session.commit()
+            should_enqueue = True
+        body = _task_state(task)
+    if should_enqueue:
+        try:
+            await enqueue_research_task(task_id, settings.redis_url)
+        except QueueUnavailableError:
+            return JSONResponse(
+                status_code=503,
+                content=_error(
+                    "queue_unavailable",
+                    "The cancellation was stored but could not be dispatched.",
+                    request_id,
+                ),
+            )
+    return JSONResponse(content=body)
+
+
+# @spec[RANCHO_ASYNC_RESEARCH.md#task-lifecycle-and-worker-behavior]
+@app.post(
+    "/v1/tasks/{task_id}/retry",
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+async def retry_task(
+    task_id: UUID,
+    settings: Settings = Depends(get_settings),
+    session_factory: async_sessionmaker | None = Depends(get_session_factory),
+) -> JSONResponse:
+    """Queue a new bounded attempt for an auditable failed or partial task."""
+    request_id = f"req_{uuid4().hex}"
+    if session_factory is None:
+        return JSONResponse(
+            status_code=503,
+            content=_error(
+                "database_unavailable", "No durable store is configured.", request_id
+            ),
+        )
+    async with session_factory() as session:
+        task = await session.get(ResearchTask, task_id, with_for_update=True)
+        if task is None:
+            return JSONResponse(
+                status_code=404,
+                content=_error("task_not_found", "No such task.", request_id),
+            )
+        if (
+            task.status not in {TaskStatus.partial, TaskStatus.failed}
+            or task.attempt >= 3
+        ):
+            return JSONResponse(
+                status_code=409,
+                content=_error(
+                    "retry_not_allowed", "This task cannot be retried.", request_id
+                ),
+            )
+        task.attempt += 1
+        task.status = TaskStatus.queued
+        await _append_task_event(
+            session, task.id, EventType.progress, "retry", {"attempt": task.attempt}
+        )
+        await session.commit()
+    try:
+        await enqueue_research_task(task_id, settings.redis_url)
+    except QueueUnavailableError:
+        return JSONResponse(
+            status_code=503,
+            content=_error(
+                "queue_unavailable",
+                "The retry was stored but could not be dispatched.",
+                request_id,
+            ),
+        )
+    return JSONResponse(content=_task_state(task), status_code=status.HTTP_202_ACCEPTED)
+
+
+def _task_state(task: ResearchTask) -> dict:
+    """Serialize the durable state returned by control endpoints."""
+    return {
+        "task_id": str(task.id),
+        "status": task.status.value,
+        "attempt": task.attempt,
+    }
+
+
+async def _append_task_event(
+    session, task_id: UUID, event_type: EventType, stage: str, payload: dict
+) -> None:
+    result = await session.execute(
+        select(func.coalesce(func.max(TaskEvent.sequence), 0)).where(
+            TaskEvent.task_id == task_id
+        )
+    )
+    session.add(
+        TaskEvent(
+            task_id=task_id,
+            sequence=int(result.scalar_one()) + 1,
+            type=event_type,
+            stage=stage,
+            payload=payload,
+        )
+    )
+
+
+# @spec[RANCHO_ASYNC_RESEARCH.md#sse-and-events]
+@app.get(
+    "/v1/tasks/{task_id}/events",
+    response_model=None,
+    responses={
+        404: {"model": ErrorResponse},
+        410: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+async def stream_task_events(
+    task_id: UUID,
+    session_factory: async_sessionmaker | None = Depends(get_session_factory),
+    last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
+) -> StreamingResponse | JSONResponse:
+    """Replay durable task events and poll until the task reaches a terminal state."""
+    request_id = f"req_{uuid4().hex}"
+    if session_factory is None:
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content=_error(
+                "database_unavailable", "No durable store is configured.", request_id
+            ),
+        )
+    after_sequence = _parse_last_event_id(last_event_id)
+    if after_sequence is None:
+        return JSONResponse(
+            status_code=status.HTTP_410_GONE,
+            content=_error(
+                "event_history_expired",
+                "The requested event history is unavailable.",
+                request_id,
+            ),
+        )
+    async with session_factory() as session:
+        task = await session.get(ResearchTask, task_id)
+        if task is None:
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content=_error("task_not_found", "No such task.", request_id),
+            )
+        if not await _is_replay_point_available(session, task_id, after_sequence):
+            return JSONResponse(
+                status_code=status.HTTP_410_GONE,
+                content=_error(
+                    "event_history_expired",
+                    "The requested event history is unavailable.",
+                    request_id,
+                ),
+            )
+    return StreamingResponse(
+        _event_stream(session_factory, task_id, after_sequence),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+def _parse_last_event_id(value: str | None) -> int | None:
+    """Parse a non-negative durable event sequence or return an invalid marker."""
+    if value is None:
+        return 0
+    try:
+        sequence = int(value)
+    except ValueError:
+        return None
+    return sequence if sequence >= 0 else None
+
+
+async def _is_replay_point_available(
+    session, task_id: UUID, after_sequence: int
+) -> bool:
+    """Require an explicit retained event for nonzero replay positions."""
+    if after_sequence == 0:
+        return True
+    result = await session.execute(
+        select(TaskEvent.id).where(
+            TaskEvent.task_id == task_id, TaskEvent.sequence == after_sequence
+        )
+    )
+    return result.scalar_one_or_none() is not None
+
+
+async def _event_stream(
+    session_factory: async_sessionmaker, task_id: UUID, after_sequence: int
+) -> AsyncIterator[str]:
+    """Yield ordered durable events after one sequence, then close at terminal state."""
+    sequence = after_sequence
+    while True:
+        async with session_factory() as session:
+            result = await session.execute(
+                select(TaskEvent)
+                .where(TaskEvent.task_id == task_id, TaskEvent.sequence > sequence)
+                .order_by(TaskEvent.sequence)
+            )
+            events = result.scalars().all()
+            task = await session.get(ResearchTask, task_id)
+        for event in events:
+            sequence = event.sequence
+            yield _format_sse_event(event)
+        if task is None or task.status in TERMINAL_STATES:
+            return
+        await asyncio.sleep(0.2)
+
+
+def _format_sse_event(event: TaskEvent) -> str:
+    """Encode one redacted durable event using the SSE wire format."""
+    payload = {
+        "task_id": str(event.task_id),
+        "sequence": event.sequence,
+        "timestamp": event.created_at.isoformat(),
+        "stage": event.stage,
+        "data": event.payload,
+    }
+    data = json.dumps(payload, separators=(",", ":"), default=str)
+    return f"id: {event.sequence}\nevent: {event.type.value}\ndata: {data}\n\n"

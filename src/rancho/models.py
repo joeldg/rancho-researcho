@@ -63,6 +63,7 @@ class ResearchTaskState(BaseModel):
     task_id: str
     status: str
     attempt: int
+    evidence_count: int
     created_at: datetime
     updated_at: datetime
 

@@ -39,6 +39,46 @@ Copy `.env.example` to `.env` to configure local services. Do not commit `.env` 
 `http://searxng:8080` in Docker Compose). It is configured by the operator and is never derived
 from a caller request or search result.
 
+## Try the async task flow
+
+Start the local stack and apply its durable-schema migration before creating a research task:
+
+```sh
+docker compose up -d --build
+docker compose exec rancho alembic upgrade head
+
+# The response contains a task_id. Substitute it in the status request below.
+curl -sS -X POST http://127.0.0.1:8000/v1/research \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: demo-1' \
+  -d '{"objective":"Compare solid-state battery approaches","max_sources":5}'
+
+curl -sS http://127.0.0.1:8000/v1/tasks/<task_id>
+
+# Replay ordered durable lifecycle events. Use -N so curl does not buffer SSE.
+curl -NsS http://127.0.0.1:8000/v1/tasks/<task_id>/events
+```
+
+The worker now performs one bounded search-and-fetch pass. The final status is still `partial`
+because planning, claim verification, and synthesis are the next slices. A positive
+`evidence_count` means safely fetched markdown was retained; a value of zero can be an honest
+result when search has no usable results or every URL is unavailable. Paste both JSON responses
+here and I can verify the durable lifecycle is working.
+
+To reconnect after an event, replay only newer events with its SSE ID:
+
+```sh
+curl -NsS http://127.0.0.1:8000/v1/tasks/<task_id>/events \
+  -H 'Last-Event-ID: 3'
+```
+
+Request cancellation or retry a partial task (up to three attempts):
+
+```sh
+curl -sS -X POST http://127.0.0.1:8000/v1/tasks/<task_id>/cancel
+curl -sS -X POST http://127.0.0.1:8000/v1/tasks/<task_id>/retry
+```
+
 ## Running with Docker Compose
 
 The [`docker-compose.yml`](docker-compose.yml) stack runs the API together with its trusted
@@ -58,7 +98,7 @@ Deployment facts (per `SECURITY_AND_SECRETS.md` requirement 7):
 
 | Field | Value |
 | --- | --- |
-| Service hostnames | `rancho`, `searxng`, `postgres`, `redis` (private Compose network) |
+| Service hostnames | `rancho`, `worker`, `searxng`, `postgres`, `redis` (private Compose network) |
 | Published port | Only `rancho` → host `${RANCHO_HOST_PORT:-8000}`; SearXNG, Postgres, and Redis are not published |
 | Public base URL | `RANCHO_PUBLIC_BASE_URL` (front this service with your own TLS terminator) |
 | Auth mode | No inbound auth in this stack; SearXNG and the LLM are trusted internal services reached by service name. Optional `RANCHO_SEARCH_API_KEY` / `RANCHO_LLM_API_KEY` are sent only as outbound bearer tokens |
