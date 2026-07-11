@@ -55,6 +55,7 @@ Goal: Establish the worker queue, database schemas, stateful agent research loop
   - [x] `Evidence` (stores canonical URLs, scraped markdown content, and hash).
   - [x] `Claim` (contains extracted claims and links to source evidence).
 - [x] Integrate background worker queue (e.g., using `arq`, `Celery`, or `rq`) running on Redis.
+- [x] Add idempotent cancellation and bounded retry controls with durable events.
 
 ### 2.2 Deep Research Agent Loop
 - [x] Deliver a bounded single-pass search and safe evidence-collection worker stage with durable events.

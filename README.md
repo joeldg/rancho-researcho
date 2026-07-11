@@ -72,6 +72,13 @@ curl -NsS http://127.0.0.1:8000/v1/tasks/<task_id>/events \
   -H 'Last-Event-ID: 3'
 ```
 
+Request cancellation or retry a partial task (up to three attempts):
+
+```sh
+curl -sS -X POST http://127.0.0.1:8000/v1/tasks/<task_id>/cancel
+curl -sS -X POST http://127.0.0.1:8000/v1/tasks/<task_id>/retry
+```
+
 ## Running with Docker Compose
 
 The [`docker-compose.yml`](docker-compose.yml) stack runs the API together with its trusted

@@ -12,7 +12,14 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from rancho.config import Settings, get_settings
 from rancho.db import get_session_factory
-from rancho.db_models import TERMINAL_STATES, Evidence, ResearchTask, TaskEvent
+from rancho.db_models import (
+    TERMINAL_STATES,
+    EventType,
+    Evidence,
+    ResearchTask,
+    TaskEvent,
+    TaskStatus,
+)
 from rancho.enrich import SnippetEnricher
 from rancho.extract import WebContentFetcher
 from rancho.llm import get_local_llm_client
@@ -55,9 +62,8 @@ def get_snippet_enricher(
     llm = get_local_llm_client(settings)
     if llm is None:
         return None
-    return SnippetEnricher(
-        llm, WebContentFetcher(), settings.search_enrich_max_results
-    )
+    return SnippetEnricher(llm, WebContentFetcher(), settings.search_enrich_max_results)
+
 
 app = FastAPI(
     title="Rancho Researcho",
@@ -265,6 +271,146 @@ async def get_task(
             created_at=task.created_at,
             updated_at=task.updated_at,
         )
+
+
+# @spec[RANCHO_ASYNC_RESEARCH.md#task-lifecycle-and-worker-behavior]
+@app.post("/v1/tasks/{task_id}/cancel", responses={404: {"model": ErrorResponse}})
+async def cancel_task(
+    task_id: UUID,
+    settings: Settings = Depends(get_settings),
+    session_factory: async_sessionmaker | None = Depends(get_session_factory),
+) -> JSONResponse:
+    """Request cancellation idempotently, retaining any evidence already stored."""
+    request_id = f"req_{uuid4().hex}"
+    if session_factory is None:
+        return JSONResponse(
+            status_code=503,
+            content=_error(
+                "database_unavailable", "No durable store is configured.", request_id
+            ),
+        )
+    should_enqueue = False
+    async with session_factory() as session:
+        task = await session.get(ResearchTask, task_id, with_for_update=True)
+        if task is None:
+            return JSONResponse(
+                status_code=404,
+                content=_error("task_not_found", "No such task.", request_id),
+            )
+        if task.status in {TaskStatus.queued, TaskStatus.running}:
+            task.status = TaskStatus.cancel_requested
+            await _append_task_event(
+                session,
+                task.id,
+                EventType.progress,
+                "cancellation",
+                {"status": "cancel_requested"},
+            )
+            await session.commit()
+            should_enqueue = True
+        body = _task_state(task)
+    if should_enqueue:
+        try:
+            await enqueue_research_task(task_id, settings.redis_url)
+        except QueueUnavailableError:
+            return JSONResponse(
+                status_code=503,
+                content=_error(
+                    "queue_unavailable",
+                    "The cancellation was stored but could not be dispatched.",
+                    request_id,
+                ),
+            )
+    return JSONResponse(content=body)
+
+
+# @spec[RANCHO_ASYNC_RESEARCH.md#task-lifecycle-and-worker-behavior]
+@app.post(
+    "/v1/tasks/{task_id}/retry",
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+    },
+)
+async def retry_task(
+    task_id: UUID,
+    settings: Settings = Depends(get_settings),
+    session_factory: async_sessionmaker | None = Depends(get_session_factory),
+) -> JSONResponse:
+    """Queue a new bounded attempt for an auditable failed or partial task."""
+    request_id = f"req_{uuid4().hex}"
+    if session_factory is None:
+        return JSONResponse(
+            status_code=503,
+            content=_error(
+                "database_unavailable", "No durable store is configured.", request_id
+            ),
+        )
+    async with session_factory() as session:
+        task = await session.get(ResearchTask, task_id, with_for_update=True)
+        if task is None:
+            return JSONResponse(
+                status_code=404,
+                content=_error("task_not_found", "No such task.", request_id),
+            )
+        if (
+            task.status not in {TaskStatus.partial, TaskStatus.failed}
+            or task.attempt >= 3
+        ):
+            return JSONResponse(
+                status_code=409,
+                content=_error(
+                    "retry_not_allowed", "This task cannot be retried.", request_id
+                ),
+            )
+        task.attempt += 1
+        task.status = TaskStatus.queued
+        await _append_task_event(
+            session, task.id, EventType.progress, "retry", {"attempt": task.attempt}
+        )
+        await session.commit()
+    try:
+        await enqueue_research_task(task_id, settings.redis_url)
+    except QueueUnavailableError:
+        return JSONResponse(
+            status_code=503,
+            content=_error(
+                "queue_unavailable",
+                "The retry was stored but could not be dispatched.",
+                request_id,
+            ),
+        )
+    return JSONResponse(content=_task_state(task), status_code=status.HTTP_202_ACCEPTED)
+
+
+def _task_state(task: ResearchTask) -> dict:
+    """Serialize the durable state returned by control endpoints."""
+    return {
+        "task_id": str(task.id),
+        "status": task.status.value,
+        "attempt": task.attempt,
+    }
+
+
+async def _append_task_event(
+    session, task_id: UUID, event_type: EventType, stage: str, payload: dict
+) -> None:
+    result = await session.execute(
+        select(func.coalesce(func.max(TaskEvent.sequence), 0)).where(
+            TaskEvent.task_id == task_id
+        )
+    )
+    session.add(
+        TaskEvent(
+            task_id=task_id,
+            sequence=int(result.scalar_one()) + 1,
+            type=event_type,
+            stage=stage,
+            payload=payload,
+        )
+    )
 
 
 # @spec[RANCHO_ASYNC_RESEARCH.md#sse-and-events]

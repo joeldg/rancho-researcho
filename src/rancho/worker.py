@@ -40,6 +40,9 @@ async def run_research_task(ctx: dict[str, Any], task_id: str) -> None:
         task = await _claim_task(factory, UUID(task_id))
         if task is None:
             return
+        if task.status is TaskStatus.cancel_requested:
+            await _finish_cancelled(factory, task.id)
+            return
 
         search = ctx.get("search") or _configured_search(settings)
         outcome = await _search_once(search, task.objective, task.budget_max_sources)
@@ -82,8 +85,13 @@ async def _claim_task(
     """Durably claim one queued task before performing external work."""
     async with factory() as session:
         task = await session.get(ResearchTask, task_id, with_for_update=True)
-        if task is None or task.status is not TaskStatus.queued:
+        if task is None or task.status not in {
+            TaskStatus.queued,
+            TaskStatus.cancel_requested,
+        }:
             return None
+        if task.status is TaskStatus.cancel_requested:
+            return task
         task.status = TaskStatus.running
         await _append_event(session, task.id, EventType.stage_started, "search")
         await session.commit()

@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from rancho.db import Base, get_session_factory
-from rancho.db_models import ResearchTask, TaskEvent
+from rancho.db_models import ResearchTask, TaskEvent, TaskStatus
 from rancho.main import app
 
 
@@ -169,3 +169,53 @@ def test_research_requires_configured_store() -> None:
 
     assert response.status_code == 503
     assert response.json()["error"]["code"] == "database_unavailable"
+
+
+# @spec[RANCHO_ASYNC_RESEARCH.md#task-lifecycle-and-worker-behavior]
+def test_cancel_is_idempotent_and_records_one_durable_event(client) -> None:
+    test_client, factory = client
+    task_id = test_client.post("/v1/research", json={"objective": "cancel me"}).json()[
+        "task_id"
+    ]
+
+    first = test_client.post(f"/v1/tasks/{task_id}/cancel")
+    second = test_client.post(f"/v1/tasks/{task_id}/cancel")
+
+    assert first.status_code == second.status_code == 200
+    assert first.json()["status"] == "cancel_requested"
+    events = _events(factory, uuid.UUID(task_id))
+    assert [(event.sequence, event.stage) for event in events] == [
+        (1, "created"),
+        (2, "cancellation"),
+    ]
+
+
+# @spec[RANCHO_ASYNC_RESEARCH.md#task-lifecycle-and-worker-behavior]
+def test_retry_requeues_partial_task_and_enforces_attempt_cap(client) -> None:
+    test_client, factory = client
+    task_id = uuid.UUID(
+        test_client.post("/v1/research", json={"objective": "retry me"}).json()[
+            "task_id"
+        ]
+    )
+
+    async def mark_partial(attempt):
+        async with factory() as session:
+            task = await session.get(ResearchTask, task_id)
+            task.status = TaskStatus.partial
+            task.attempt = attempt
+            await session.commit()
+
+    asyncio.run(mark_partial(1))
+    accepted = test_client.post(f"/v1/tasks/{task_id}/retry")
+    assert accepted.status_code == 202
+    assert accepted.json() == {
+        "task_id": str(task_id),
+        "status": "queued",
+        "attempt": 2,
+    }
+
+    asyncio.run(mark_partial(3))
+    rejected = test_client.post(f"/v1/tasks/{task_id}/retry")
+    assert rejected.status_code == 409
+    assert rejected.json()["error"]["code"] == "retry_not_allowed"
