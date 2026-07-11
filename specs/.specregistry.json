@@ -2,7 +2,7 @@
   "project_type": "SaaS Backend API",
   "project": "github.com/joeldg/rancho-researcho",
   "channel": "stable",
-  "fetched_at": "2026-07-11T05:10:37.656Z",
+  "fetched_at": "2026-07-11T05:21:40.848Z",
   "specs": [
     {
       "filename": "AGENT_OPERATING_RULES.md",
@@ -129,8 +129,15 @@
       "project_type": "github.com/joeldg/rancho-researcho",
       "scope": "project",
       "sha256": "9b4e0ec1fab2cc467c559b7d59934d724cd67c6dc0d6cb00f2fc40ed48bd509b"
+    },
+    {
+      "filename": "RANCHO_SNIPPET_SYNTHESIS.md",
+      "version": "1.0.0",
+      "project_type": "github.com/joeldg/rancho-researcho",
+      "scope": "project",
+      "sha256": "bfdcbc665abe13b78406a859c6ff8f7883a067f7606d16385b30d11932c5851d"
     }
   ],
-  "signature": "iO9aaEdvLLFLAHhi1BxvdK1v6G27mcDGJ7Yj75PShSEs7pVQPQUULH/FjfQ/aR+RNHRUoZXYxA/1KkkBy7uADw==",
+  "signature": "/pAD1cjvBiRI3DKF9TtQtWD/s26WsA7+4ER/tFNion9zI3PWHVmLsytkN+5ndbd9dqq+pPgcVzyZpqNI7DurCw==",
   "signature_alg": "ed25519"
 }
