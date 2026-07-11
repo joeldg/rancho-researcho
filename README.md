@@ -39,6 +39,27 @@ Copy `.env.example` to `.env` to configure local services. Do not commit `.env` 
 `http://searxng:8080` in Docker Compose). It is configured by the operator and is never derived
 from a caller request or search result.
 
+## Try the async task flow
+
+Start the local stack and apply its durable-schema migration before creating a research task:
+
+```sh
+docker compose up -d --build
+docker compose exec rancho alembic upgrade head
+
+# The response contains a task_id. Substitute it in the status request below.
+curl -sS -X POST http://127.0.0.1:8000/v1/research \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: demo-1' \
+  -d '{"objective":"Compare solid-state battery approaches","max_sources":5}'
+
+curl -sS http://127.0.0.1:8000/v1/tasks/<task_id>
+```
+
+The current worker intentionally ends the task as `partial` after recording `task.created` and
+`stage.started`; the full deep-research loop is the next delivery slice. Paste both JSON responses
+here and I can verify the durable lifecycle is working.
+
 ## Running with Docker Compose
 
 The [`docker-compose.yml`](docker-compose.yml) stack runs the API together with its trusted

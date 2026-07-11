@@ -19,6 +19,12 @@ COPY pyproject.toml uv.lock README.md ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-install-project --no-dev
 
+# The runtime image includes Alembic's configuration and immutable migrations so
+# operators can upgrade the durable store without mounting source from the host.
+# @spec[RANCHO_ASYNC_RESEARCH.md#architecture-and-storage]
+COPY alembic.ini ./
+COPY migrations ./migrations
+
 # Install the application itself against the locked environment.
 COPY src ./src
 RUN --mount=type=cache,target=/root/.cache/uv \
