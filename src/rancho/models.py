@@ -37,6 +37,36 @@ class SearchResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+# @spec[RANCHO_ASYNC_RESEARCH.md#task-lifecycle-and-worker-behavior]
+class ResearchRequest(BaseModel):
+    """A bounded deep-research task request."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    objective: str = Field(min_length=1, max_length=2_000)
+    max_sources: int = Field(default=10, ge=1, le=50)
+
+
+# @spec[RANCHO_ASYNC_RESEARCH.md#task-lifecycle-and-worker-behavior]
+class ResearchTaskAccepted(BaseModel):
+    """The 202 acceptance payload for a created or replayed research task."""
+
+    task_id: str
+    status: str
+    status_url: str
+
+
+# @spec[RANCHO_ASYNC_RESEARCH.md#task-lifecycle-and-worker-behavior]
+class ResearchTaskState(BaseModel):
+    """The current durable state of a research task."""
+
+    task_id: str
+    status: str
+    attempt: int
+    created_at: datetime
+    updated_at: datetime
+
+
 # @spec[RANCHO_API_SECURITY.md#http-contract]
 class ErrorDetail(BaseModel):
     """Machine-readable error payload."""
