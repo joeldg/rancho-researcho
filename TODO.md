@@ -50,10 +50,10 @@ Goal: Implement the Parkour-compatible `/v1/search` endpoint using direct local 
 Goal: Establish the worker queue, database schemas, stateful agent research loop, and claim verification.
 
 ### 2.1 Database & Background Worker
-- [ ] Create database tables and migrations (using Alembic/SQLAlchemy):
-  - [ ] `ResearchTask` (tracks task metadata, state, input query, models used).
-  - [ ] `Evidence` (stores canonical URLs, scraped markdown content, and hash).
-  - [ ] `Claim` (contains extracted claims and links to source evidence).
+- [x] Create database tables and migrations (using Alembic/SQLAlchemy):
+  - [x] `ResearchTask` (tracks task metadata, state, input query, models used).
+  - [x] `Evidence` (stores canonical URLs, scraped markdown content, and hash).
+  - [x] `Claim` (contains extracted claims and links to source evidence).
 - [ ] Integrate background worker queue (e.g., using `arq`, `Celery`, or `rq`) running on Redis.
 
 ### 2.2 Deep Research Agent Loop
