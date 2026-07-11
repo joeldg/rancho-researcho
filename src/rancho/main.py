@@ -1,21 +1,44 @@
 """FastAPI entry point for Rancho Researcho."""
 
-from uuid import uuid4
+from uuid import UUID, uuid4
 
-from fastapi import Depends, FastAPI, Response, status
+from fastapi import Depends, FastAPI, Header, Response, status
 from fastapi.responses import JSONResponse, PlainTextResponse
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from rancho.config import Settings, get_settings
+from rancho.db import get_session_factory
+from rancho.db_models import ResearchTask
 from rancho.enrich import SnippetEnricher
 from rancho.extract import WebContentFetcher
 from rancho.llm import get_local_llm_client
-from rancho.models import ErrorResponse, SearchRequest, SearchResponse
+from rancho.models import (
+    ErrorResponse,
+    ResearchRequest,
+    ResearchTaskAccepted,
+    ResearchTaskState,
+    SearchRequest,
+    SearchResponse,
+)
+from rancho.queue import enqueue_research_task
+from rancho.research import ResearchConflictError, create_or_get_research_task
 from rancho.search import (
     ProviderUnavailableError,
     SearchAdapter,
     SearchOrchestrator,
     get_search_adapter,
 )
+
+
+def _error(code: str, message: str, request_id: str) -> dict:
+    return ErrorResponse(
+        error={"code": code, "message": message}, request_id=request_id
+    ).model_dump(mode="json")
+
+
+def _status_url(settings: Settings, task_id: UUID) -> str:
+    base = str(settings.public_base_url).rstrip("/") if settings.public_base_url else ""
+    return f"{base}/v1/tasks/{task_id}"
 
 
 # @spec[RANCHO_SNIPPET_SYNTHESIS.md#requirements]
@@ -138,3 +161,87 @@ def search(
     if enricher is not None:
         results, warnings = enricher.enrich(request.query, results, warnings)
     return SearchResponse(results=results, request_id=request_id, warnings=warnings)
+
+
+# @spec[RANCHO_ASYNC_RESEARCH.md#task-lifecycle-and-worker-behavior]
+@app.post(
+    "/v1/research",
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={409: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+)
+async def create_research(
+    request: ResearchRequest,
+    settings: Settings = Depends(get_settings),
+    session_factory: async_sessionmaker | None = Depends(get_session_factory),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> JSONResponse:
+    """Create a queued research task and its task.created event, then enqueue it."""
+    request_id = f"req_{uuid4().hex}"
+    if session_factory is None:
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content=_error(
+                "database_unavailable", "No durable store is configured.", request_id
+            ),
+        )
+    async with session_factory() as session:
+        try:
+            task, _created = await create_or_get_research_task(
+                session, request.objective, request.max_sources, idempotency_key
+            )
+        except ResearchConflictError:
+            return JSONResponse(
+                status_code=status.HTTP_409_CONFLICT,
+                content=_error(
+                    "idempotency_key_conflict",
+                    "The idempotency key was reused with a different request.",
+                    request_id,
+                ),
+            )
+        task_id, task_status = task.id, task.status.value
+    # Enqueue only after the creation transaction has committed.
+    await enqueue_research_task(task_id)
+    status_url = _status_url(settings, task_id)
+    body = ResearchTaskAccepted(
+        task_id=str(task_id), status=task_status, status_url=status_url
+    )
+    return JSONResponse(
+        status_code=status.HTTP_202_ACCEPTED,
+        content=body.model_dump(),
+        headers={"Location": status_url},
+    )
+
+
+# @spec[RANCHO_ASYNC_RESEARCH.md#task-lifecycle-and-worker-behavior]
+@app.get(
+    "/v1/tasks/{task_id}",
+    response_model=ResearchTaskState,
+    responses={404: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+)
+async def get_task(
+    task_id: UUID,
+    session_factory: async_sessionmaker | None = Depends(get_session_factory),
+) -> ResearchTaskState | JSONResponse:
+    """Return the current durable state of a research task."""
+    request_id = f"req_{uuid4().hex}"
+    if session_factory is None:
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content=_error(
+                "database_unavailable", "No durable store is configured.", request_id
+            ),
+        )
+    async with session_factory() as session:
+        task = await session.get(ResearchTask, task_id)
+        if task is None:
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content=_error("task_not_found", "No such task.", request_id),
+            )
+        return ResearchTaskState(
+            task_id=str(task.id),
+            status=task.status.value,
+            attempt=task.attempt,
+            created_at=task.created_at,
+            updated_at=task.updated_at,
+        )

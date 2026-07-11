@@ -38,3 +38,18 @@ def create_session_factory(
 ) -> async_sessionmaker[AsyncSession]:
     """Return a session factory that keeps objects usable after commit."""
     return async_sessionmaker(engine, expire_on_commit=False)
+
+
+_session_factory: async_sessionmaker[AsyncSession] | None = None
+_factory_built = False
+
+
+# @spec[RANCHO_ASYNC_RESEARCH.md#architecture-and-storage]
+def get_session_factory() -> async_sessionmaker[AsyncSession] | None:
+    """Return the process-wide session factory, or None if no store is set."""
+    global _session_factory, _factory_built
+    if not _factory_built:
+        engine = create_engine()
+        _session_factory = create_session_factory(engine) if engine else None
+        _factory_built = True
+    return _session_factory
