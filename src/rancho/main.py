@@ -20,7 +20,7 @@ from rancho.models import (
     SearchRequest,
     SearchResponse,
 )
-from rancho.queue import enqueue_research_task
+from rancho.queue import QueueUnavailableError, enqueue_research_task
 from rancho.research import ResearchConflictError, create_or_get_research_task
 from rancho.search import (
     ProviderUnavailableError,
@@ -200,7 +200,17 @@ async def create_research(
             )
         task_id, task_status = task.id, task.status.value
     # Enqueue only after the creation transaction has committed.
-    await enqueue_research_task(task_id)
+    try:
+        await enqueue_research_task(task_id, settings.redis_url)
+    except QueueUnavailableError:
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content=_error(
+                "queue_unavailable",
+                "The task was stored but could not be dispatched.",
+                request_id,
+            ),
+        )
     status_url = _status_url(settings, task_id)
     body = ResearchTaskAccepted(
         task_id=str(task_id), status=task_status, status_url=status_url

@@ -15,7 +15,7 @@ from rancho.main import app
 
 
 @pytest.fixture
-def client(tmp_path):
+def client(tmp_path, monkeypatch):
     engine = create_async_engine(
         f"sqlite+aiosqlite:///{tmp_path / 'api.db'}", poolclass=NullPool
     )
@@ -26,6 +26,11 @@ def client(tmp_path):
 
     asyncio.run(_create())
     factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def enqueue(task_id, redis_url):
+        return None
+
+    monkeypatch.setattr("rancho.main.enqueue_research_task", enqueue)
     app.dependency_overrides[get_session_factory] = lambda: factory
     try:
         with TestClient(app) as test_client:

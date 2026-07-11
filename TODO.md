@@ -54,7 +54,7 @@ Goal: Establish the worker queue, database schemas, stateful agent research loop
   - [x] `ResearchTask` (tracks task metadata, state, input query, models used).
   - [x] `Evidence` (stores canonical URLs, scraped markdown content, and hash).
   - [x] `Claim` (contains extracted claims and links to source evidence).
-- [ ] Integrate background worker queue (e.g., using `arq`, `Celery`, or `rq`) running on Redis.
+- [x] Integrate background worker queue (e.g., using `arq`, `Celery`, or `rq`) running on Redis.
 
 ### 2.2 Deep Research Agent Loop
 - [ ] Implement the stateful **Research Loop** driven by the local LLM:
