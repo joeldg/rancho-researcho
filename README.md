@@ -56,8 +56,10 @@ curl -sS -X POST http://127.0.0.1:8000/v1/research \
 curl -sS http://127.0.0.1:8000/v1/tasks/<task_id>
 ```
 
-The current worker intentionally ends the task as `partial` after recording `task.created` and
-`stage.started`; the full deep-research loop is the next delivery slice. Paste both JSON responses
+The worker now performs one bounded search-and-fetch pass. The final status is still `partial`
+because planning, claim verification, and synthesis are the next slices. A positive
+`evidence_count` means safely fetched markdown was retained; a value of zero can be an honest
+result when search has no usable results or every URL is unavailable. Paste both JSON responses
 here and I can verify the durable lifecycle is working.
 
 ## Running with Docker Compose
@@ -79,7 +81,7 @@ Deployment facts (per `SECURITY_AND_SECRETS.md` requirement 7):
 
 | Field | Value |
 | --- | --- |
-| Service hostnames | `rancho`, `searxng`, `postgres`, `redis` (private Compose network) |
+| Service hostnames | `rancho`, `worker`, `searxng`, `postgres`, `redis` (private Compose network) |
 | Published port | Only `rancho` → host `${RANCHO_HOST_PORT:-8000}`; SearXNG, Postgres, and Redis are not published |
 | Public base URL | `RANCHO_PUBLIC_BASE_URL` (front this service with your own TLS terminator) |
 | Auth mode | No inbound auth in this stack; SearXNG and the LLM are trusted internal services reached by service name. Optional `RANCHO_SEARCH_API_KEY` / `RANCHO_LLM_API_KEY` are sent only as outbound bearer tokens |

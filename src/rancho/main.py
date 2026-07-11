@@ -4,11 +4,12 @@ from uuid import UUID, uuid4
 
 from fastapi import Depends, FastAPI, Header, Response, status
 from fastapi.responses import JSONResponse, PlainTextResponse
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from rancho.config import Settings, get_settings
 from rancho.db import get_session_factory
-from rancho.db_models import ResearchTask
+from rancho.db_models import Evidence, ResearchTask
 from rancho.enrich import SnippetEnricher
 from rancho.extract import WebContentFetcher
 from rancho.llm import get_local_llm_client
@@ -248,10 +249,16 @@ async def get_task(
                 status_code=status.HTTP_404_NOT_FOUND,
                 content=_error("task_not_found", "No such task.", request_id),
             )
+        count_result = await session.execute(
+            select(func.count())
+            .select_from(Evidence)
+            .where(Evidence.task_id == task.id)
+        )
         return ResearchTaskState(
             task_id=str(task.id),
             status=task.status.value,
             attempt=task.attempt,
+            evidence_count=int(count_result.scalar_one()),
             created_at=task.created_at,
             updated_at=task.updated_at,
         )

@@ -57,6 +57,7 @@ Goal: Establish the worker queue, database schemas, stateful agent research loop
 - [x] Integrate background worker queue (e.g., using `arq`, `Celery`, or `rq`) running on Redis.
 
 ### 2.2 Deep Research Agent Loop
+- [x] Deliver a bounded single-pass search and safe evidence-collection worker stage with durable events.
 - [ ] Implement the stateful **Research Loop** driven by the local LLM:
   1. **Planning**: LLM expands the objective into an initial list of target search queries.
   2. **Search & Crawl**: Execute queries and fetch top result URLs.
