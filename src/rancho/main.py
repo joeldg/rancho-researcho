@@ -14,6 +14,7 @@ from rancho.config import Settings, get_settings
 from rancho.db import get_session_factory
 from rancho.db_models import (
     TERMINAL_STATES,
+    Claim,
     EventType,
     Evidence,
     ResearchTask,
@@ -263,11 +264,16 @@ async def get_task(
             .select_from(Evidence)
             .where(Evidence.task_id == task.id)
         )
+        claim_count = await session.scalar(
+            select(func.count()).select_from(Claim).where(Claim.task_id == task.id)
+        )
         return ResearchTaskState(
             task_id=str(task.id),
             status=task.status.value,
             attempt=task.attempt,
             evidence_count=int(count_result.scalar_one()),
+            claim_count=int(claim_count or 0),
+            result=task.final_result,
             created_at=task.created_at,
             updated_at=task.updated_at,
         )

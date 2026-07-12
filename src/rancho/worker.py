@@ -15,7 +15,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from rancho.config import Settings, get_settings
 from rancho.db import create_engine, create_session_factory
-from rancho.db_models import EventType, Evidence, ResearchTask, TaskEvent, TaskStatus
+from rancho.db_models import (
+    Claim,
+    EventType,
+    Evidence,
+    ResearchTask,
+    TaskEvent,
+    TaskStatus,
+)
 from rancho.extract import ContentUnavailableError, WebContentFetcher
 from rancho.llm import get_local_llm_client
 from rancho.planning import plan_queries
@@ -25,16 +32,16 @@ from rancho.search import (
     SearchOrchestrator,
     _build_active_adapters,
 )
+from rancho.synthesis import (
+    VerificationUnavailableError,
+    render_verified_claims,
+    synthesize_claims,
+)
 
 
 # @spec[RANCHO_ASYNC_RESEARCH.md#task-lifecycle-and-worker-behavior]
 async def run_research_task(ctx: dict[str, Any], task_id: str) -> None:
-    """Collect bounded, safely fetched evidence for one queued research task.
-
-    The worker intentionally finishes ``partial``: LLM planning, claim extraction,
-    and final synthesis remain separate future slices. It never creates evidence
-    for an unavailable or refused fetch.
-    """
+    """Collect evidence, verify candidate claims, then finish honestly."""
     settings = ctx.get("settings") or get_settings()
     factory, engine = _session_factory(ctx, settings)
     if factory is None:
@@ -90,7 +97,11 @@ async def run_research_task(ctx: dict[str, Any], task_id: str) -> None:
             if remaining <= 0:
                 break
 
-        await _finish_partial(factory, task.id)
+        llm = ctx.get("llm") or get_local_llm_client(settings)
+        if llm is None:
+            await _finish_partial(factory, task.id, "verification_unavailable")
+            return
+        await _verify_and_finish(factory, task.id, llm, settings)
     finally:
         if engine is not None:
             await engine.dispose()
@@ -230,8 +241,10 @@ async def _is_cancel_requested(factory: async_sessionmaker, task_id: UUID) -> bo
         return task is not None and task.status is TaskStatus.cancel_requested
 
 
-async def _finish_partial(factory: async_sessionmaker, task_id: UUID) -> None:
-    """Record the honest terminal state until approved synthesis exists."""
+async def _finish_partial(
+    factory: async_sessionmaker, task_id: UUID, reason: str = "verification_incomplete"
+) -> None:
+    """Record a redacted partial outcome when verification cannot complete."""
     async with factory() as session:
         task = await session.get(ResearchTask, task_id, with_for_update=True)
         if task is None or task.status is not TaskStatus.running:
@@ -242,8 +255,66 @@ async def _finish_partial(factory: async_sessionmaker, task_id: UUID) -> None:
             task.id,
             EventType.task_partial,
             "synthesis",
-            {"reason": "synthesis_not_implemented"},
+            {"reason": reason},
         )
+        await session.commit()
+
+
+# @spec[RANCHO_CLAIM_VERIFICATION.md#requirements]
+async def _verify_and_finish(
+    factory: async_sessionmaker, task_id: UUID, llm: Any, settings: Settings
+) -> None:
+    """Persist only verified claims and complete atomically after verification."""
+    async with factory() as session:
+        evidence = (
+            (
+                await session.execute(
+                    select(Evidence)
+                    .where(Evidence.task_id == task_id)
+                    .order_by(Evidence.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        task = await session.get(ResearchTask, task_id)
+        if task is None:
+            return
+        objective = task.objective
+    try:
+        verified = await asyncio.to_thread(
+            synthesize_claims,
+            llm,
+            objective,
+            list(evidence),
+            min(settings.research_max_planner_tokens * 4, 2048),
+        )
+    except VerificationUnavailableError:
+        await _finish_partial(factory, task_id, "verification_unavailable")
+        return
+    if not verified:
+        await _finish_partial(factory, task_id, "no_verified_claims")
+        return
+
+    result = render_verified_claims(verified)
+    async with factory() as session:
+        task = await session.get(ResearchTask, task_id, with_for_update=True)
+        if task is None or task.status is not TaskStatus.running:
+            return
+        for item in verified:
+            claim = Claim(task_id=task_id, text=item.text, evidence=list(item.evidence))
+            session.add(claim)
+            await session.flush()
+            await _append_event(
+                session,
+                task_id,
+                EventType.claim_verified,
+                "verification",
+                {"claim_id": str(claim.id), "evidence_count": len(item.evidence)},
+            )
+        task.final_result = result
+        task.status = TaskStatus.completed
+        await _append_event(session, task_id, EventType.task_completed, "synthesis")
         await session.commit()
 
 

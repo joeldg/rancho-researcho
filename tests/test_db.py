@@ -48,6 +48,15 @@ def _sqlite_tables(path: Path) -> set[str]:
     return {row[0] for row in rows}
 
 
+def _sqlite_columns(path: Path, table: str) -> set[str]:
+    connection = sqlite3.connect(path)
+    try:
+        rows = connection.execute(f"PRAGMA table_info({table})").fetchall()
+    finally:
+        connection.close()
+    return {row[1] for row in rows}
+
+
 # @spec[RANCHO_ASYNC_RESEARCH.md#security-observability-and-tests]
 def test_migration_upgrade_then_downgrade(tmp_path, monkeypatch) -> None:
     db_file = tmp_path / "durable.db"
@@ -55,6 +64,7 @@ def test_migration_upgrade_then_downgrade(tmp_path, monkeypatch) -> None:
 
     command.upgrade(config, "head")
     assert _DURABLE_TABLES <= _sqlite_tables(db_file)
+    assert "final_result" in _sqlite_columns(db_file, "research_tasks")
 
     command.downgrade(config, "base")
     assert _DURABLE_TABLES.isdisjoint(_sqlite_tables(db_file))

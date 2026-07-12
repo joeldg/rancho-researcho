@@ -149,6 +149,8 @@ def test_get_task_returns_state(client) -> None:
     assert body["task_id"] == task_id
     assert body["status"] == "queued"
     assert body["attempt"] == 1
+    assert body["claim_count"] == 0
+    assert body["result"] is None
 
 
 # @spec[RANCHO_ASYNC_RESEARCH.md#task-lifecycle-and-worker-behavior]
