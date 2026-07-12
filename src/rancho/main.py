@@ -18,6 +18,7 @@ from rancho.db_models import (
     Claim,
     EventType,
     Evidence,
+    Monitor,
     ResearchTask,
     TaskEvent,
     TaskStatus,
@@ -29,11 +30,19 @@ from rancho.llm import get_local_llm_client
 from rancho.models import (
     ErrorResponse,
     FindAllRequest,
+    MonitorRequest,
+    MonitorRunRequest,
     ResearchRequest,
     ResearchTaskAccepted,
     ResearchTaskState,
     SearchRequest,
     SearchResponse,
+)
+from rancho.monitors import (
+    WebhookDeliveryError,
+    create_or_get_monitor,
+    deliver_webhook,
+    record_monitor_run,
 )
 from rancho.queue import QueueUnavailableError, enqueue_research_task
 from rancho.research import ResearchConflictError, create_or_get_research_task
@@ -347,6 +356,8 @@ async def get_task(
                     "id": str(candidate.id),
                     "fields": candidate.data,
                     "evidence_ids": [str(item.id) for item in candidate.evidence],
+                    "match_status": candidate.match_status,
+                    "reasoning": candidate.reasoning,
                 }
             )
         return ResearchTaskState(
@@ -360,6 +371,174 @@ async def get_task(
             candidates=candidates,
             created_at=task.created_at,
             updated_at=task.updated_at,
+        )
+
+
+def _monitor_state(monitor: Monitor) -> dict:
+    return {
+        "monitor_id": str(monitor.id),
+        "objective": monitor.objective,
+        "output_schema": monitor.output_schema,
+        "interval_minutes": monitor.interval_minutes,
+        "webhook_enabled": bool(monitor.webhook_url),
+        "active": monitor.active,
+        "next_run_at": monitor.next_run_at.isoformat(),
+    }
+
+
+# @spec[RANCHO_FINDALL_AND_MONITORS.md#requirements]
+@app.post("/v1/monitors", status_code=201)
+async def create_monitor(
+    request: MonitorRequest,
+    session_factory: async_sessionmaker | None = Depends(get_session_factory),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> JSONResponse:
+    request_id = f"req_{uuid4().hex}"
+    if session_factory is None:
+        return JSONResponse(
+            status_code=503,
+            content=_error(
+                "database_unavailable", "No durable store is configured.", request_id
+            ),
+        )
+    secret = (
+        request.webhook_secret.get_secret_value() if request.webhook_secret else None
+    )
+    if bool(request.webhook_url) != bool(secret):
+        return JSONResponse(
+            status_code=422,
+            content=_error(
+                "invalid_webhook",
+                "Webhook URL and secret must be configured together.",
+                request_id,
+            ),
+        )
+    async with session_factory() as session:
+        try:
+            monitor, created = await create_or_get_monitor(
+                session,
+                objective=request.objective,
+                output_schema=request.output_schema,
+                interval_minutes=request.interval_minutes,
+                webhook_url=request.webhook_url,
+                webhook_secret=secret,
+                idempotency_key=idempotency_key,
+            )
+        except ResearchConflictError:
+            return JSONResponse(
+                status_code=409,
+                content=_error(
+                    "idempotency_key_conflict",
+                    "The idempotency key was reused with a different request.",
+                    request_id,
+                ),
+            )
+        return JSONResponse(
+            status_code=201 if created else 200, content=_monitor_state(monitor)
+        )
+
+
+# @spec[RANCHO_FINDALL_AND_MONITORS.md#requirements]
+@app.get("/v1/monitors/{monitor_id}")
+async def get_monitor(
+    monitor_id: UUID,
+    session_factory: async_sessionmaker | None = Depends(get_session_factory),
+) -> JSONResponse:
+    if session_factory is None:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": {
+                    "code": "database_unavailable",
+                    "message": "No durable store is configured.",
+                },
+                "request_id": f"req_{uuid4().hex}",
+            },
+        )
+    async with session_factory() as session:
+        monitor = await session.get(Monitor, monitor_id)
+        if monitor is None:
+            return JSONResponse(
+                status_code=404,
+                content=_error(
+                    "monitor_not_found", "No such monitor.", f"req_{uuid4().hex}"
+                ),
+            )
+        return JSONResponse(content=_monitor_state(monitor))
+
+
+# @spec[RANCHO_FINDALL_AND_MONITORS.md#requirements]
+@app.post("/v1/monitors/{monitor_id}/runs", status_code=201)
+async def create_monitor_run(
+    monitor_id: UUID,
+    request: MonitorRunRequest,
+    session_factory: async_sessionmaker | None = Depends(get_session_factory),
+) -> JSONResponse:
+    request_id = f"req_{uuid4().hex}"
+    if session_factory is None:
+        return JSONResponse(
+            status_code=503,
+            content=_error(
+                "database_unavailable", "No durable store is configured.", request_id
+            ),
+        )
+    try:
+        task_id = UUID(request.task_id)
+    except ValueError:
+        return JSONResponse(
+            status_code=422,
+            content=_error("invalid_task_id", "Invalid task ID.", request_id),
+        )
+    async with session_factory() as session:
+        monitor = await session.get(Monitor, monitor_id)
+        task = await session.get(ResearchTask, task_id)
+        if monitor is None or task is None or task.task_type != "findall":
+            return JSONResponse(
+                status_code=404,
+                content=_error(
+                    "monitor_input_not_found",
+                    "Monitor or FindAll task not found.",
+                    request_id,
+                ),
+            )
+        evidence = list(
+            (await session.execute(select(Evidence).where(Evidence.task_id == task.id)))
+            .scalars()
+            .all()
+        )
+        try:
+            run = await record_monitor_run(session, monitor, task, evidence)
+        except ValueError:
+            return JSONResponse(
+                status_code=409,
+                content=_error(
+                    "task_not_completed",
+                    "The FindAll task is not completed.",
+                    request_id,
+                ),
+            )
+        try:
+            await asyncio.to_thread(deliver_webhook, monitor, run)
+        except WebhookDeliveryError:
+            return JSONResponse(
+                status_code=502,
+                content=_error(
+                    "webhook_unavailable",
+                    "The signed webhook could not be delivered.",
+                    request_id,
+                ),
+            )
+        return JSONResponse(
+            status_code=201,
+            content={
+                "run_id": str(run.id),
+                "monitor_id": str(monitor.id),
+                "task_id": str(task.id),
+                "outcome": run.outcome,
+                "material_change": run.material_change,
+                "evidence_hashes": run.evidence_hashes,
+                "next_run_at": run.next_run_at.isoformat(),
+            },
         )
 
 
