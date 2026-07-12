@@ -60,9 +60,15 @@ curl -NsS http://127.0.0.1:8000/v1/tasks/<task_id>/events
 ```
 
 The worker performs bounded search and fetch passes, then asks the configured local LLM for
-structured candidate claims. Rancho treats that response as untrusted: it retains only bounded
-claims whose evidence UUIDs belong to the task and whose URLs match retained evidence. The final
-result renders citations from canonical stored URLs in the form
+an evidence-coverage decision. Incomplete coverage schedules focused secondary queries ahead of
+unused planned queries, while source, iteration, elapsed-time, and model-output-token budgets
+bound the loop. Cancellation is checked before and after every model, search, and fetch boundary;
+canonical URLs are not fetched twice within an attempt. Retained page text is placed in an
+explicitly delimited untrusted-data block and is never treated as model instructions.
+
+After evaluation, the model returns structured candidate claims. Rancho treats that response as
+untrusted: it retains only bounded claims whose evidence UUIDs belong to the task and whose URLs
+match retained evidence. The final result renders citations from canonical stored URLs in the form
 `[evidence:<uuid>](<canonical-url>)`. The task becomes `completed` only after those checks and
 claim persistence succeed. Missing evidence, an unavailable model, malformed output, or no
 verified claims produces an honest `partial` result with a redacted terminal event.
@@ -89,6 +95,11 @@ For a local end-to-end verification, configure `RANCHO_LLM_PROVIDER`,
 `RANCHO_LLM_BASE_URL`, and `RANCHO_LLM_MODEL`, submit a task, wait for a terminal event, then
 inspect the status response. Every URL in `result` must also be present as a canonical URL in the
 task's retained evidence, and `completed` must have a positive `claim_count`.
+
+The loop budgets are configured with `RANCHO_RESEARCH_MAX_ITERATIONS`,
+`RANCHO_RESEARCH_MAX_ELAPSED_SECONDS`, `RANCHO_RESEARCH_MAX_PLANNER_TOKENS`, and
+`RANCHO_RESEARCH_MAX_MODEL_TOKENS`. `RANCHO_RESEARCH_PLANNING=true` enables an initial planning
+pass; iterative evidence evaluation remains bounded by the same limits.
 
 ## Running with Docker Compose
 

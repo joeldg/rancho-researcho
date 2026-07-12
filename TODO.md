@@ -59,13 +59,13 @@ Goal: Establish the worker queue, database schemas, stateful agent research loop
 
 ### 2.2 Deep Research Agent Loop
 - [x] Deliver a bounded single-pass search and safe evidence-collection worker stage with durable events.
-- [ ] Implement the stateful **Research Loop** driven by the local LLM:
-  1. **Planning**: LLM expands the objective into an initial list of target search queries.
-  2. **Search & Crawl**: Execute queries and fetch top result URLs.
-  3. **Read**: Scrape text content of the target URLs.
-  4. **Evaluate**: LLM reviews retrieved evidence against the goal, determining which questions remain unanswered.
-  5. **Iterate**: Generate secondary queries or target specific sub-links to crawl (up to max recursion depth or budget limit).
-  6. **Synthesize**: Compile the final answer markdown.
+- [x] Implement the stateful **Research Loop** driven by the local LLM:
+  1. [x] **Planning**: LLM expands the objective into an initial list of target search queries.
+  2. [x] **Search & Crawl**: Execute bounded queries and safely fetch top result URLs.
+  3. [x] **Read**: Retain bounded markdown evidence from safely fetched URLs.
+  4. [x] **Evaluate**: LLM reviews delimited, untrusted evidence against the goal and identifies coverage gaps.
+  5. [x] **Iterate**: Schedule focused secondary queries within source, iteration, elapsed-time, and model-token budgets.
+  6. [x] **Synthesize**: Persist only verified claims and render the final cited result.
 
 ### 2.3 Evidence & Citation Engine
 - [x] Implement a post-processing claim extractor:

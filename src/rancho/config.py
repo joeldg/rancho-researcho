@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     research_max_iterations: int = Field(default=2, ge=1, le=5)
     research_max_elapsed_seconds: int = Field(default=120, ge=5, le=600)
     research_max_planner_tokens: int = Field(default=256, ge=32, le=1024)
+    research_max_model_tokens: int = Field(default=4096, ge=128, le=16384)
     database_url: str | None = None
     redis_url: str | None = None
 
