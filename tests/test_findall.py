@@ -5,7 +5,18 @@ import uuid
 from datetime import datetime, timezone
 
 from rancho.db_models import Evidence
-from rancho.findall import validate_candidates
+from rancho.findall import extract_candidates, validate_candidates
+
+
+class _LLM:
+    def __init__(self, response):
+        self.response = response
+        self.messages = None
+
+    def complete(self, messages, **kwargs):
+        del kwargs
+        self.messages = messages
+        return self.response
 
 
 def _evidence(task_id):
@@ -76,3 +87,31 @@ def test_model_prose_is_not_a_candidate_result():
         )
         == []
     )
+
+
+def test_fenced_empty_candidate_result_is_an_honest_empty_result():
+    assert (
+        validate_candidates(
+            'No supported matches were found.\n```json\n{"candidates":[]}\n```',
+            {"name": "string"},
+            [_evidence(uuid.uuid4())],
+        )
+        == []
+    )
+
+
+def test_candidate_prompt_is_bounded_across_many_large_evidence_rows():
+    evidence = [_evidence(uuid.uuid4()) for _ in range(20)]
+    for item in evidence:
+        item.title = "Source"
+        item.content = "retained evidence " * 2_000
+    llm = _LLM('{"candidates":[]}')
+
+    assert extract_candidates(
+        llm,
+        "Find documented projects",
+        {"name": "string", "license": "string"},
+        evidence,
+        256,
+    ) == []
+    assert len(llm.messages[1]["content"]) < 12_000

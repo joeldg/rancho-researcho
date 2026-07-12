@@ -29,6 +29,7 @@ services:
       RANCHO_LLM_MODEL: ${RANCHO_LLM_MODEL:-}
       RANCHO_LLM_COMPLEX_MODEL: ${RANCHO_LLM_COMPLEX_MODEL:-}
       RANCHO_LLM_API_KEY: ${RANCHO_LLM_API_KEY:-}
+      RANCHO_RESEARCH_PLANNING: ${RANCHO_RESEARCH_PLANNING:-true}
     # req 7: start only after dependencies report healthy.
     depends_on:
       searxng:
@@ -56,6 +57,13 @@ services:
       RANCHO_SEARCH_API_KEY: ${RANCHO_SEARCH_API_KEY:-}
       RANCHO_DATABASE_URL: postgresql://rancho:${POSTGRES_PASSWORD}@postgres:5432/rancho
       RANCHO_REDIS_URL: redis://redis:6379/0
+      # The worker synthesizes claims, so it needs the same local LLM config.
+      RANCHO_LLM_PROVIDER: ${RANCHO_LLM_PROVIDER:-}
+      RANCHO_LLM_BASE_URL: ${RANCHO_LLM_BASE_URL:-}
+      RANCHO_LLM_MODEL: ${RANCHO_LLM_MODEL:-}
+      RANCHO_LLM_COMPLEX_MODEL: ${RANCHO_LLM_COMPLEX_MODEL:-}
+      RANCHO_LLM_API_KEY: ${RANCHO_LLM_API_KEY:-}
+      RANCHO_RESEARCH_PLANNING: ${RANCHO_RESEARCH_PLANNING:-true}
     depends_on:
       searxng:
         condition: service_healthy

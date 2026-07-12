@@ -8,6 +8,7 @@ from typing import Any
 
 from rancho.db_models import Evidence
 from rancho.llm import LLMUnavailableError, LocalLLMClient
+from rancho.structured_output import StructuredOutputError, parse_single_json_object
 
 _MAX_EVIDENCE_PROMPT_CHARS = 8_000
 _MAX_QUERY_CHARS = 2_000
@@ -70,8 +71,8 @@ def evaluate_evidence(
 def validate_evaluation(response: str, query_limit: int) -> Evaluation:
     """Validate untrusted evaluator JSON without executing model text."""
     try:
-        payload = json.loads(response)
-    except (TypeError, ValueError) as error:
+        payload = parse_single_json_object(response)
+    except StructuredOutputError as error:
         raise EvaluationUnavailableError from error
     if not isinstance(payload, dict) or set(payload) != {"complete", "queries"}:
         raise EvaluationUnavailableError
@@ -85,6 +86,11 @@ def validate_evaluation(response: str, query_limit: int) -> Evaluation:
         raise EvaluationUnavailableError
     queries: list[str] = []
     for value in raw_queries:
+        if isinstance(value, dict) and set(value) == {"query", "rationale"}:
+            rationale = value["rationale"]
+            if not isinstance(rationale, str) or len(rationale) > 1_000:
+                raise EvaluationUnavailableError
+            value = value["query"]
         if not isinstance(value, str):
             raise EvaluationUnavailableError
         query = value.strip()

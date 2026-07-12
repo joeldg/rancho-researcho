@@ -10,7 +10,14 @@ from sqlalchemy.pool import NullPool
 
 from rancho.config import Settings
 from rancho.db import Base
-from rancho.db_models import Claim, Evidence, ResearchTask, TaskEvent, TaskStatus
+from rancho.db_models import (
+    Claim,
+    EventType,
+    Evidence,
+    ResearchTask,
+    TaskEvent,
+    TaskStatus,
+)
 from rancho.extract import ContentUnavailableError, FetchedPage
 from rancho.llm import LLMUnavailableError
 from rancho.models import SearchResult
@@ -133,7 +140,12 @@ def test_worker_honestly_completes_partial_when_search_is_unavailable(tmp_path):
         async with factory() as session:
             task, _ = await create_or_get_research_task(session, "unavailable", 1, None)
         await run_research_task(
-            {"session_factory": factory, "search": _UnavailableSearch()}, str(task.id)
+            {
+                "session_factory": factory,
+                "search": _UnavailableSearch(),
+                "llm": None,
+            },
+            str(task.id),
         )
         async with factory() as session:
             persisted = await session.get(ResearchTask, task.id)
@@ -180,10 +192,10 @@ def test_worker_persists_verified_claims_and_completes_after_verification(tmp_pa
             def complete(self, messages, **kwargs):
                 del kwargs
                 if "EVIDENCE_JSON" in messages[0]["content"]:
-                    return json.dumps({"complete": True, "queries": []})
+                    return '```json\n{"complete":true,"queries":[]}\n```'
                 bundle = json.loads(messages[1]["content"])["evidence"]
                 item = bundle[0]
-                return json.dumps(
+                return "Result:\n```json\n" + json.dumps(
                     {
                         "claims": [
                             {
@@ -198,7 +210,7 @@ def test_worker_persists_verified_claims_and_completes_after_verification(tmp_pa
                             },
                         ]
                     }
-                )
+                ) + "\n```"
 
         await run_research_task(
             {
@@ -446,3 +458,48 @@ def test_worker_finishes_partial_when_evaluation_model_fails(tmp_path):
 
     assert task.status is TaskStatus.partial
     assert events[-1].payload == {"reason": "evaluation_unavailable"}
+
+
+# @spec[RANCHO_ASYNC_RESEARCH.md#task-lifecycle-and-worker-behavior]
+def test_worker_records_redacted_failed_terminal_state_on_unexpected_error(tmp_path):
+    class _CrashingFetcher:
+        def fetch(self, url):
+            del url
+            raise RuntimeError("secret internal detail")
+
+    async def scenario():
+        engine = create_async_engine(
+            f"sqlite+aiosqlite:///{tmp_path / 'unexpected.db'}", poolclass=NullPool
+        )
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with factory() as session:
+            task, _ = await create_or_get_research_task(session, "unexpected", 1, None)
+        await run_research_task(
+            {
+                "session_factory": factory,
+                "search": _Search([_result(1)]),
+                "fetcher": _CrashingFetcher(),
+                "llm": None,
+            },
+            str(task.id),
+        )
+        async with factory() as session:
+            persisted = await session.get(ResearchTask, task.id)
+            events = (
+                await session.execute(
+                    select(TaskEvent)
+                    .where(TaskEvent.task_id == task.id)
+                    .order_by(TaskEvent.sequence)
+                )
+            ).scalars().all()
+        await engine.dispose()
+        return persisted, events
+
+    task, events = asyncio.run(scenario())
+
+    assert task.status is TaskStatus.failed
+    assert events[-1].type is EventType.task_failed
+    assert events[-1].payload == {"reason": "internal_unavailable"}
+    assert "secret internal detail" not in str(events[-1].payload)

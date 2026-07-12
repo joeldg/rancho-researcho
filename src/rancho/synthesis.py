@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -10,6 +9,8 @@ from uuid import UUID
 
 from rancho.db_models import Evidence
 from rancho.llm import LLMUnavailableError, LocalLLMClient
+from rancho.prompt_budget import serialize_bounded_evidence_payload
+from rancho.structured_output import StructuredOutputError, parse_single_json_object
 
 _MAX_CLAIMS = 50
 _MAX_CLAIM_LENGTH = 2_000
@@ -43,7 +44,7 @@ def synthesize_claims(
             "evidence_id": str(item.id),
             "canonical_url": item.canonical_url,
             "title": item.title,
-            "content": item.content[:8_000],
+            "content": item.content,
         }
         for item in evidence
     ]
@@ -60,9 +61,8 @@ def synthesize_claims(
                 },
                 {
                     "role": "user",
-                    "content": json.dumps(
-                        {"objective": objective, "evidence": bundle},
-                        separators=(",", ":"),
+                    "content": serialize_bounded_evidence_payload(
+                        {"objective": objective, "evidence": bundle}
                     ),
                 },
             ],
@@ -80,8 +80,8 @@ def verify_candidates(
 ) -> list[VerifiedClaim]:
     """Validate untrusted candidate IDs, ownership, URLs, and bounded text."""
     try:
-        payload = json.loads(response)
-    except (TypeError, ValueError) as error:
+        payload = parse_single_json_object(response)
+    except StructuredOutputError as error:
         raise VerificationUnavailableError from error
     if not isinstance(payload, dict) or set(payload) != {"claims"}:
         raise VerificationUnavailableError

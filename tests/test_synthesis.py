@@ -4,8 +4,14 @@ import json
 import uuid
 from datetime import datetime, timezone
 
+import pytest
+
 from rancho.db_models import Evidence
-from rancho.synthesis import render_verified_claims, verify_candidates
+from rancho.synthesis import (
+    VerificationUnavailableError,
+    render_verified_claims,
+    verify_candidates,
+)
 
 
 def _evidence(task_id, url):
@@ -74,3 +80,28 @@ def test_rejects_absent_url_and_omits_unsupported_claims():
         f"- Verified fact [evidence:{retained.id}](https://example.com/canonical)"
     )
     assert "unknown.example" not in rendered
+
+
+def test_accepts_one_fenced_json_object_without_weakening_verification():
+    retained = _evidence(uuid.uuid4(), "https://example.com/canonical")
+    payload = {
+        "claims": [
+            _candidate("Verified fact", [retained.id], [retained.canonical_url]),
+            _candidate("Unsupported", [uuid.uuid4()], []),
+        ]
+    }
+
+    verified = verify_candidates(
+        f"Here is the requested result:\n```json\n{json.dumps(payload)}\n```\nDone.",
+        [retained],
+    )
+
+    assert [claim.text for claim in verified] == ["Verified fact"]
+
+
+def test_rejects_ambiguous_multiple_json_objects():
+    retained = _evidence(uuid.uuid4(), "https://example.com/canonical")
+    response = '{"claims":[]}\n{"claims":[]}'
+
+    with pytest.raises(VerificationUnavailableError):
+        verify_candidates(response, [retained])

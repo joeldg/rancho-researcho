@@ -60,6 +60,33 @@ def test_validation_accepts_bounded_secondary_queries():
     assert result.queries == ("gap one", "gap two")
 
 
+def test_validation_accepts_fenced_single_decision_object():
+    result = validate_evaluation(
+        '```json\n{"complete":true,"queries":[]}\n```', 2
+    )
+
+    assert result.complete is True
+
+
+def test_validation_accepts_bounded_query_and_rationale_shape():
+    result = validate_evaluation(
+        json.dumps(
+            {
+                "complete": False,
+                "queries": [
+                    {
+                        "query": "site:sqlite.org/wal.html checkpoint starvation",
+                        "rationale": "Official WAL documentation",
+                    }
+                ],
+            }
+        ),
+        2,
+    )
+
+    assert result.queries == ("site:sqlite.org/wal.html checkpoint starvation",)
+
+
 # @spec[RANCHO_DEEP_RESEARCH_LOOP.md#requirements]
 @pytest.mark.parametrize(
     "payload",
