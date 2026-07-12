@@ -22,7 +22,7 @@ Before editing code, configuration, tests, docs, or generated artifacts:
 
 Local governance files:
 
-- Registry: http://10.0.0.142:4000
+- Registry: http://127.0.0.1:4000
 - Project type: SaaS Backend API
 - Project/repo: github.com/joeldg/rancho-researcho
 - Governed specs: `specs/`

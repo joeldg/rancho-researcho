@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import time
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
@@ -16,6 +17,8 @@ from rancho.config import Settings, get_settings
 from rancho.db import create_engine, create_session_factory
 from rancho.db_models import EventType, Evidence, ResearchTask, TaskEvent, TaskStatus
 from rancho.extract import ContentUnavailableError, WebContentFetcher
+from rancho.llm import get_local_llm_client
+from rancho.planning import plan_queries
 from rancho.search import (
     OrchestratedSearch,
     ProviderUnavailableError,
@@ -45,15 +48,47 @@ async def run_research_task(ctx: dict[str, Any], task_id: str) -> None:
             return
 
         search = ctx.get("search") or _configured_search(settings)
-        outcome = await _search_once(search, task.objective, task.budget_max_sources)
-        await _record_search_outcome(factory, task.id, outcome)
-
+        queries = [task.objective]
+        if settings.research_planning:
+            llm = ctx.get("llm") or get_local_llm_client(settings)
+            if llm is None:
+                await _finish_partial(factory, task.id)
+                return
+            queries = await asyncio.to_thread(
+                plan_queries,
+                llm,
+                task.objective,
+                settings.research_max_iterations,
+                settings.research_max_planner_tokens,
+            )
+            if not queries:
+                await _finish_partial(factory, task.id)
+                return
         fetcher = ctx.get("fetcher") or WebContentFetcher()
-        for result in outcome.results:
+        started = time.monotonic()
+        seen_urls: set[str] = set()
+        remaining = task.budget_max_sources
+        for iteration, query in enumerate(queries, start=1):
+            if time.monotonic() - started >= settings.research_max_elapsed_seconds:
+                break
             if await _is_cancel_requested(factory, task.id):
                 await _finish_cancelled(factory, task.id)
                 return
-            await _collect_evidence(factory, task.id, result, fetcher)
+            await _record_progress(factory, task.id, iteration)
+            outcome = await _search_once(search, query, remaining)
+            await _record_search_outcome(factory, task.id, outcome)
+            for result in outcome.results:
+                url = str(result.url)
+                if url in seen_urls or remaining <= 0:
+                    continue
+                seen_urls.add(url)
+                if await _is_cancel_requested(factory, task.id):
+                    await _finish_cancelled(factory, task.id)
+                    return
+                await _collect_evidence(factory, task.id, result, fetcher)
+                remaining -= 1
+            if remaining <= 0:
+                break
 
         await _finish_partial(factory, task.id)
     finally:
@@ -121,6 +156,17 @@ async def _record_search_outcome(
             EventType.search_completed,
             "search",
             {"result_count": len(outcome.results), "degraded": bool(outcome.warnings)},
+        )
+        await session.commit()
+
+
+async def _record_progress(
+    factory: async_sessionmaker, task_id: UUID, iteration: int
+) -> None:
+    """Persist a redacted bounded-loop progress marker."""
+    async with factory() as session:
+        await _append_event(
+            session, task_id, EventType.progress, "research", {"iteration": iteration}
         )
         await session.commit()
 

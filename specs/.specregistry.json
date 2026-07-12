@@ -2,7 +2,7 @@
   "project_type": "SaaS Backend API",
   "project": "github.com/joeldg/rancho-researcho",
   "channel": "stable",
-  "fetched_at": "2026-07-11T05:21:40.848Z",
+  "fetched_at": "2026-07-11T22:01:06.688Z",
   "specs": [
     {
       "filename": "AGENT_OPERATING_RULES.md",
@@ -96,6 +96,13 @@
       "sha256": "f9e3acc55cba81215d2023372c1f00378c750ff55e1bb005e5c01c15fb3e6094"
     },
     {
+      "filename": "RANCHO_CLAIM_VERIFICATION.md",
+      "version": "1.0.0",
+      "project_type": "github.com/joeldg/rancho-researcho",
+      "scope": "project",
+      "sha256": "695e7512f0924f3207fc7e9dc9f98bcdd3849bcd9d6505979ad1b5ebfbf8ce24"
+    },
+    {
       "filename": "RANCHO_CONTENT_EXTRACTION.md",
       "version": "1.0.0",
       "project_type": "github.com/joeldg/rancho-researcho",
@@ -103,11 +110,25 @@
       "sha256": "5c729fb9a06e59c4c1378f8c2de1991246c2c9ade035ee9dd3f2ded6ff979826"
     },
     {
+      "filename": "RANCHO_DEEP_RESEARCH_LOOP.md",
+      "version": "1.0.0",
+      "project_type": "github.com/joeldg/rancho-researcho",
+      "scope": "project",
+      "sha256": "6c819a02b28efe19f4fb48981ea02f1c11fedff6e3dd1c6aaebc3984dcaf8271"
+    },
+    {
       "filename": "RANCHO_DEPLOYMENT.md",
       "version": "1.0.0",
       "project_type": "github.com/joeldg/rancho-researcho",
       "scope": "project",
       "sha256": "48b59da5a28fbdb9b68f53d852910b3d5b43d169b271e098ef26b7c894526107"
+    },
+    {
+      "filename": "RANCHO_FINDALL_AND_MONITORS.md",
+      "version": "1.0.0",
+      "project_type": "github.com/joeldg/rancho-researcho",
+      "scope": "project",
+      "sha256": "7469e9f259942560cd0610594917a9809ba706bce8a7163f409b15b1cf332e26"
     },
     {
       "filename": "RANCHO_LOCAL_LLM.md",
@@ -138,6 +159,6 @@
       "sha256": "bfdcbc665abe13b78406a859c6ff8f7883a067f7606d16385b30d11932c5851d"
     }
   ],
-  "signature": "/pAD1cjvBiRI3DKF9TtQtWD/s26WsA7+4ER/tFNion9zI3PWHVmLsytkN+5ndbd9dqq+pPgcVzyZpqNI7DurCw==",
+  "signature": "YCYqMJ9aDA1a0VpAzObFJD291SOKajl2REgib2IU44b8yW+/idwT/z8pLsbRzD/swgtcCB7UTPMR0aL6vIHKCA==",
   "signature_alg": "ed25519"
 }
