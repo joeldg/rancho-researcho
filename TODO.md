@@ -90,14 +90,14 @@ Goal: Implement structured candidate extraction and scheduled tracking monitors.
   - [x] LLM generates targeted candidate-finding queries within the research-loop budgets.
   - [x] Extract and persist only schema-valid candidates linked to retained evidence.
   - [ ] For each candidate, run a sub-agent pass using LLM to extract fields matching a JSON/Pydantic schema.
-  - [ ] Record match status, reasoning, and evidence IDs for each candidate.
+  - [x] Record validated match status, bounded reasoning, and evidence IDs for each persisted candidate.
 
 ### 3.2 Recurring Monitor Scheduler
 - [ ] Implement scheduler (e.g., APScheduler) to run periodic monitoring jobs.
-- [ ] Implement `POST /v1/monitors` endpoint.
+- [x] Implement idempotent `POST /v1/monitors` and durable monitor-run recording endpoints.
 - [ ] Implement change detection engine:
-  - [ ] Compare current search result hashes / text semantic structures with the previous run.
-  - [ ] Trigger an alert webhook if material changes are detected.
+  - [x] Compare sorted retained canonical URLs and content hashes with the previous run.
+  - [x] Trigger a bounded, HTTPS-only HMAC-signed alert webhook only for material changes.
   - [ ] Optionally trigger a follow-up deep research task with budget bounds.
 
 ---

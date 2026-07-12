@@ -8,6 +8,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     Column,
     DateTime,
     Enum,
@@ -203,12 +204,68 @@ class Candidate(Base):
         ForeignKey("research_tasks.id", ondelete="CASCADE"), index=True
     )
     data: Mapped[dict] = mapped_column(JSON)
+    match_status: Mapped[str] = mapped_column(String(16), default="matched")
+    reasoning: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
 
     task: Mapped[ResearchTask] = relationship(back_populates="candidates")
     evidence: Mapped[list[Evidence]] = relationship(secondary=candidate_evidence)
+
+
+# @spec[RANCHO_FINDALL_AND_MONITORS.md#requirements]
+class Monitor(Base):
+    """A bounded durable recurring FindAll schedule."""
+
+    __tablename__ = "monitors"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    objective: Mapped[str] = mapped_column(Text)
+    output_schema: Mapped[dict] = mapped_column(JSON)
+    interval_minutes: Mapped[int] = mapped_column(Integer)
+    webhook_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    webhook_secret: Mapped[str | None] = mapped_column(Text, nullable=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    request_fingerprint: Mapped[str] = mapped_column(String(64))
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    next_run_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    runs: Mapped[list[MonitorRun]] = relationship(
+        back_populates="monitor", cascade="all, delete-orphan"
+    )
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_monitors_idempotency_key"),
+    )
+
+
+# @spec[RANCHO_FINDALL_AND_MONITORS.md#requirements]
+class MonitorRun(Base):
+    """An immutable evidence snapshot and outcome for one monitor execution."""
+
+    __tablename__ = "monitor_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    monitor_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("monitors.id", ondelete="CASCADE"), index=True
+    )
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("research_tasks.id", ondelete="RESTRICT"), index=True
+    )
+    input: Mapped[dict] = mapped_column(JSON)
+    evidence_hashes: Mapped[dict] = mapped_column(JSON)
+    outcome: Mapped[str] = mapped_column(String(32))
+    material_change: Mapped[bool] = mapped_column(Boolean)
+    next_run_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    monitor: Mapped[Monitor] = relationship(back_populates="runs")
 
 
 # @spec[RANCHO_ASYNC_RESEARCH.md#architecture-and-storage]

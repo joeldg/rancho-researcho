@@ -31,18 +31,26 @@ def test_candidates_require_exact_schema_and_task_evidence():
                 {
                     "fields": {"name": "Acme", "active": True},
                     "evidence_ids": [str(retained.id)],
+                    "match_status": "matched",
+                    "reasoning": "The retained profile supports the match.",
                 },
                 {
                     "fields": {"name": "Unknown", "active": True},
                     "evidence_ids": [str(other.id)],
+                    "match_status": "matched",
+                    "reasoning": "Cross-task support is invalid.",
                 },
                 {
                     "fields": {"name": "Extra", "active": True, "city": "LA"},
                     "evidence_ids": [str(retained.id)],
+                    "match_status": "matched",
+                    "reasoning": "Unknown fields are invalid.",
                 },
                 {
                     "fields": {"name": "Wrong type", "active": "yes"},
                     "evidence_ids": [str(retained.id)],
+                    "match_status": "matched",
+                    "reasoning": "Wrong types are invalid.",
                 },
             ]
         }
@@ -54,13 +62,17 @@ def test_candidates_require_exact_schema_and_task_evidence():
 
     assert len(verified) == 1
     assert verified[0].data == {"name": "Acme", "active": True}
+    assert verified[0].reasoning == "The retained profile supports the match."
     assert [item.id for item in verified[0].evidence] == [retained.id]
 
 
 # @spec[RANCHO_FINDALL_AND_MONITORS.md#requirements]
 def test_model_prose_is_not_a_candidate_result():
-    assert validate_candidates(
-        json.dumps({"candidates": ["Acme is probably a match."]}),
-        {"name": "string"},
-        [_evidence(uuid.uuid4())],
-    ) == []
+    assert (
+        validate_candidates(
+            json.dumps({"candidates": ["Acme is probably a match."]}),
+            {"name": "string"},
+            [_evidence(uuid.uuid4())],
+        )
+        == []
+    )

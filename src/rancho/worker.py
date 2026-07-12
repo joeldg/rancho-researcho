@@ -454,7 +454,13 @@ async def _extract_findall_and_finish(
             return
         for item in verified:
             session.add(
-                Candidate(task_id=task_id, data=item.data, evidence=list(item.evidence))
+                Candidate(
+                    task_id=task_id,
+                    data=item.data,
+                    match_status="matched",
+                    reasoning=item.reasoning,
+                    evidence=list(item.evidence),
+                )
             )
         task.status = TaskStatus.completed
         await _append_event(

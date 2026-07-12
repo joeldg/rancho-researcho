@@ -124,7 +124,35 @@ curl -sS http://127.0.0.1:8000/v1/tasks/<task_id>
 
 The task response identifies `task_type: "findall"` and returns `candidates`; each candidate
 contains only the declared fields plus its retained `evidence_ids`. Model prose, unknown fields,
-wrong types, and candidates without task-owned evidence are omitted rather than persisted.
+wrong types, rejected matches, and candidates without task-owned evidence are omitted rather
+than persisted. Persisted candidates also include `match_status: "matched"` and bounded
+evidence-based `reasoning`.
+
+## Recurring monitors
+
+Create an explicit durable monitor with a bounded interval of 15 minutes through seven days:
+
+```sh
+curl -sS -X POST http://127.0.0.1:8000/v1/monitors \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: ev-monitor' \
+  -d '{
+    "objective":"Watch California EV companies",
+    "output_schema":{"name":"string"},
+    "interval_minutes":1440
+  }'
+```
+
+After a completed FindAll task, record its immutable monitor snapshot with
+`POST /v1/monitors/<monitor_id>/runs` and body `{"task_id":"<task_id>"}`. Each run stores the
+monitor input, sorted canonical URL/content-SHA-256 pairs, outcome, material-change decision,
+and next scheduled time. The first run establishes a baseline; later alerts occur only when the
+snapshot changes.
+
+Optional webhook delivery requires a credential-free HTTPS URL on port 443 and a secret of at
+least 16 characters. Alerts contain only monitor/run IDs, outcome, change flag, and next-run
+time. They use `X-Rancho-Signature: sha256=<HMAC>` over the exact JSON body, follow no redirects,
+and use a five-second timeout. Secrets and raw delivery errors never appear in responses.
 
 ## Running with Docker Compose
 

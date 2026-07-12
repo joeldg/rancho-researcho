@@ -133,6 +133,53 @@ def test_findall_idempotency_includes_declared_schema(client) -> None:
     assert conflict.status_code == 409
 
 
+# @spec[RANCHO_FINDALL_AND_MONITORS.md#acceptance-evidence]
+def test_monitor_creation_is_idempotent_and_never_returns_secret(client) -> None:
+    test_client, _ = client
+    headers = {"Idempotency-Key": "monitor-one"}
+    body = {
+        "objective": "Watch EV companies",
+        "output_schema": {"name": "string"},
+        "interval_minutes": 60,
+        "webhook_url": "https://hooks.example.test/change",
+        "webhook_secret": "a-very-long-webhook-secret",
+    }
+    first = test_client.post("/v1/monitors", json=body, headers=headers)
+    replay = test_client.post("/v1/monitors", json=body, headers=headers)
+
+    assert first.status_code == 201
+    assert replay.status_code == 200
+    assert first.json()["monitor_id"] == replay.json()["monitor_id"]
+    assert "secret" not in first.text
+    assert first.json()["webhook_enabled"] is True
+
+
+def test_monitor_rejects_unbounded_schedule_and_insecure_webhook(client) -> None:
+    test_client, _ = client
+    base = {
+        "objective": "watch",
+        "output_schema": {"name": "string"},
+        "interval_minutes": 60,
+    }
+    assert (
+        test_client.post(
+            "/v1/monitors", json={**base, "interval_minutes": 1}
+        ).status_code
+        == 422
+    )
+    assert (
+        test_client.post(
+            "/v1/monitors",
+            json={
+                **base,
+                "webhook_url": "http://hooks.example",
+                "webhook_secret": "long-secret-value",
+            },
+        ).status_code
+        == 422
+    )
+
+
 # @spec[RANCHO_ASYNC_RESEARCH.md#task-lifecycle-and-worker-behavior]
 def test_rejects_empty_objective(client) -> None:
     test_client, _ = client

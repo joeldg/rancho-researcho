@@ -29,6 +29,8 @@ _DURABLE_TABLES = {
     "task_events",
     "candidates",
     "candidate_evidence",
+    "monitors",
+    "monitor_runs",
 }
 
 
