@@ -90,6 +90,21 @@ claim_evidence = Table(
 )
 
 
+# @spec[RANCHO_FINDALL_AND_MONITORS.md#requirements]
+candidate_evidence = Table(
+    "candidate_evidence",
+    Base.metadata,
+    Column(
+        "candidate_id",
+        ForeignKey("candidates.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "evidence_id", ForeignKey("evidence.id", ondelete="CASCADE"), primary_key=True
+    ),
+)
+
+
 # @spec[RANCHO_ASYNC_RESEARCH.md#architecture-and-storage]
 class ResearchTask(Base):
     """A durable research task: the system of record for its lifecycle."""
@@ -98,6 +113,8 @@ class ResearchTask(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     objective: Mapped[str] = mapped_column(Text)
+    task_type: Mapped[str] = mapped_column(String(32), default="research", index=True)
+    output_schema: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     budget_max_sources: Mapped[int] = mapped_column(Integer, default=10)
     status: Mapped[TaskStatus] = mapped_column(
         _status_enum(), default=TaskStatus.queued, index=True
@@ -122,6 +139,9 @@ class ResearchTask(Base):
         back_populates="task", cascade="all, delete-orphan"
     )
     claims: Mapped[list[Claim]] = relationship(
+        back_populates="task", cascade="all, delete-orphan"
+    )
+    candidates: Mapped[list[Candidate]] = relationship(
         back_populates="task", cascade="all, delete-orphan"
     )
 
@@ -150,9 +170,7 @@ class Evidence(Base):
 
     task: Mapped[ResearchTask] = relationship(back_populates="evidence")
 
-    __table_args__ = (
-        Index("ix_evidence_task_canonical", "task_id", "canonical_url"),
-    )
+    __table_args__ = (Index("ix_evidence_task_canonical", "task_id", "canonical_url"),)
 
 
 # @spec[RANCHO_ASYNC_RESEARCH.md#architecture-and-storage]
@@ -172,6 +190,25 @@ class Claim(Base):
 
     task: Mapped[ResearchTask] = relationship(back_populates="claims")
     evidence: Mapped[list[Evidence]] = relationship(secondary=claim_evidence)
+
+
+# @spec[RANCHO_FINDALL_AND_MONITORS.md#requirements]
+class Candidate(Base):
+    """A schema-valid FindAll result linked to retained task evidence."""
+
+    __tablename__ = "candidates"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("research_tasks.id", ondelete="CASCADE"), index=True
+    )
+    data: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    task: Mapped[ResearchTask] = relationship(back_populates="candidates")
+    evidence: Mapped[list[Evidence]] = relationship(secondary=candidate_evidence)
 
 
 # @spec[RANCHO_ASYNC_RESEARCH.md#architecture-and-storage]
@@ -195,8 +232,6 @@ class TaskEvent(Base):
     task: Mapped[ResearchTask] = relationship(back_populates="events")
 
     __table_args__ = (
-        UniqueConstraint(
-            "task_id", "sequence", name="uq_task_events_task_sequence"
-        ),
+        UniqueConstraint("task_id", "sequence", name="uq_task_events_task_sequence"),
         Index("ix_task_events_task_sequence", "task_id", "sequence"),
     )

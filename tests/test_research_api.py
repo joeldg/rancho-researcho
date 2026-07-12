@@ -86,6 +86,53 @@ def test_create_persists_task_and_created_event(client) -> None:
     assert [(e.sequence, e.type.value) for e in events] == [(1, "task.created")]
 
 
+# @spec[RANCHO_FINDALL_AND_MONITORS.md#requirements]
+def test_findall_creates_durable_schema_task(client) -> None:
+    test_client, factory = client
+    response = test_client.post(
+        "/v1/findall",
+        json={
+            "objective": "Find California EV companies",
+            "output_schema": {"name": "string", "active": "boolean"},
+            "max_sources": 5,
+        },
+    )
+
+    assert response.status_code == 202
+    task = _task(factory, uuid.UUID(response.json()["task_id"]))
+    assert task.task_type == "findall"
+    assert task.output_schema == {"name": "string", "active": "boolean"}
+
+
+# @spec[RANCHO_FINDALL_AND_MONITORS.md#acceptance-evidence]
+def test_findall_rejects_invalid_declared_schema(client) -> None:
+    test_client, _ = client
+    response = test_client.post(
+        "/v1/findall",
+        json={"objective": "Find companies", "output_schema": {"name": "object"}},
+    )
+
+    assert response.status_code == 422
+
+
+# @spec[RANCHO_FINDALL_AND_MONITORS.md#requirements]
+def test_findall_idempotency_includes_declared_schema(client) -> None:
+    test_client, _ = client
+    headers = {"Idempotency-Key": "findall-one"}
+    body = {"objective": "Find companies", "output_schema": {"name": "string"}}
+
+    first = test_client.post("/v1/findall", json=body, headers=headers)
+    replay = test_client.post("/v1/findall", json=body, headers=headers)
+    conflict = test_client.post(
+        "/v1/findall",
+        json={"objective": "Find companies", "output_schema": {"active": "boolean"}},
+        headers=headers,
+    )
+
+    assert first.json()["task_id"] == replay.json()["task_id"]
+    assert conflict.status_code == 409
+
+
 # @spec[RANCHO_ASYNC_RESEARCH.md#task-lifecycle-and-worker-behavior]
 def test_rejects_empty_objective(client) -> None:
     test_client, _ = client
@@ -147,6 +194,7 @@ def test_get_task_returns_state(client) -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["task_id"] == task_id
+    assert body["task_type"] == "research"
     assert body["status"] == "queued"
     assert body["attempt"] == 1
     assert body["claim_count"] == 0

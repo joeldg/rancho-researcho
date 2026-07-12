@@ -101,6 +101,31 @@ The loop budgets are configured with `RANCHO_RESEARCH_MAX_ITERATIONS`,
 `RANCHO_RESEARCH_MAX_MODEL_TOKENS`. `RANCHO_RESEARCH_PLANNING=true` enables an initial planning
 pass; iterative evidence evaluation remains bounded by the same limits.
 
+## FindAll candidate discovery
+
+`POST /v1/findall` starts a bounded Phase 3 discovery task. The declared schema supports 1–20
+named fields of type `string`, `number`, or `boolean`; unknown request fields and unsupported
+schema types are rejected. FindAll uses the same durable queue, safe fetcher, cancellation,
+budgets, events, and retry controls as research tasks, while persisting results separately as
+schema-valid candidates linked to retained evidence UUIDs.
+
+```sh
+curl -sS -X POST http://127.0.0.1:8000/v1/findall \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: california-ev-companies' \
+  -d '{
+    "objective":"Find electric vehicle companies in California",
+    "output_schema":{"name":"string","active":"boolean"},
+    "max_sources":10
+  }'
+
+curl -sS http://127.0.0.1:8000/v1/tasks/<task_id>
+```
+
+The task response identifies `task_type: "findall"` and returns `candidates`; each candidate
+contains only the declared fields plus its retained `evidence_ids`. Model prose, unknown fields,
+wrong types, and candidates without task-owned evidence are omitted rather than persisted.
+
 ## Running with Docker Compose
 
 The [`docker-compose.yml`](docker-compose.yml) stack runs the API together with its trusted

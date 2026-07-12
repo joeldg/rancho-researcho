@@ -85,10 +85,10 @@ Goal: Establish the worker queue, database schemas, stateful agent research loop
 Goal: Implement structured candidate extraction and scheduled tracking monitors.
 
 ### 3.1 FindAll Candidate Discovery Engine
-- [ ] Implement `POST /v1/findall` endpoint for discovery runs (e.g., "Find all electric vehicle startups in California").
+- [x] Implement `POST /v1/findall` endpoint for bounded, durable discovery runs with a declared output schema.
 - [ ] Implement the FindAll pipeline:
-  - [ ] LLM generates targeted candidate-finding queries.
-  - [ ] Extract potential candidate entities from search results and crawled pages.
+  - [x] LLM generates targeted candidate-finding queries within the research-loop budgets.
+  - [x] Extract and persist only schema-valid candidates linked to retained evidence.
   - [ ] For each candidate, run a sub-agent pass using LLM to extract fields matching a JSON/Pydantic schema.
   - [ ] Record match status, reasoning, and evidence IDs for each candidate.
 
