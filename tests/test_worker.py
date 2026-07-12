@@ -26,6 +26,15 @@ from rancho.search import OrchestratedSearch
 from rancho.worker import run_research_task
 
 
+def _no_planning(**overrides) -> Settings:
+    """Settings with the default-on planning stage disabled.
+
+    These tests exercise the search/evaluate/synthesize path directly; initial
+    planning is covered separately in test_planning.py.
+    """
+    return Settings(_env_file=None, research_planning=False, **overrides)
+
+
 class _Search:
     def __init__(self, results):
         self._results = results
@@ -83,6 +92,7 @@ def test_worker_persists_safe_evidence_and_ordered_redacted_events(tmp_path):
         await run_research_task(
             {
                 "session_factory": factory,
+                "settings": _no_planning(),
                 "search": _Search([first, second]),
                 "fetcher": fetcher,
             },
@@ -142,6 +152,7 @@ def test_worker_honestly_completes_partial_when_search_is_unavailable(tmp_path):
         await run_research_task(
             {
                 "session_factory": factory,
+                "settings": _no_planning(),
                 "search": _UnavailableSearch(),
                 "llm": None,
             },
@@ -218,6 +229,7 @@ def test_worker_persists_verified_claims_and_completes_after_verification(tmp_pa
                 "search": _Search([result]),
                 "fetcher": fetcher,
                 "llm": _EvidenceAwareLLM(),
+                "settings": _no_planning(),
             },
             str(task.id),
         )
@@ -315,7 +327,7 @@ def test_worker_runs_bounded_multi_step_evaluation_and_avoids_duplicates(tmp_pat
                 "search": search,
                 "fetcher": fetcher,
                 "llm": _IterativeLLM(),
-                "settings": Settings(
+                "settings": _no_planning(
                     research_max_iterations=2,
                     research_max_planner_tokens=64,
                     research_max_model_tokens=512,
@@ -392,6 +404,7 @@ def test_worker_cancels_after_search_before_fetch(tmp_path):
         await run_research_task(
             {
                 "session_factory": factory,
+                "settings": _no_planning(),
                 "search": _CancellingSearch(factory, task.id, result),
                 "fetcher": _Fetcher({}),
             },
@@ -438,6 +451,7 @@ def test_worker_finishes_partial_when_evaluation_model_fails(tmp_path):
                         )
                     }
                 ),
+                "settings": _no_planning(),
                 "llm": _FailingLLM(),
             },
             str(task.id),
@@ -480,6 +494,7 @@ def test_worker_records_redacted_failed_terminal_state_on_unexpected_error(tmp_p
             {
                 "session_factory": factory,
                 "search": _Search([_result(1)]),
+                "settings": _no_planning(),
                 "fetcher": _CrashingFetcher(),
                 "llm": None,
             },
