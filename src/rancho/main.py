@@ -3,9 +3,10 @@
 import asyncio
 import json
 from collections.abc import AsyncIterator
+from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
-from fastapi import Depends, FastAPI, Header, Response, status
+from fastapi import Depends, FastAPI, Header, Query, Response, status
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -465,6 +466,74 @@ async def get_monitor(
                 ),
             )
         return JSONResponse(content=_monitor_state(monitor))
+
+
+# @spec[RANCHO_FINDALL_AND_MONITORS.md#requirements]
+@app.get("/v1/monitors")
+async def list_monitors(
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    session_factory: async_sessionmaker | None = Depends(get_session_factory),
+) -> JSONResponse:
+    if session_factory is None:
+        return JSONResponse(status_code=503, content={"monitors": []})
+    async with session_factory() as session:
+        rows = list(
+            (
+                await session.execute(
+                    select(Monitor)
+                    .order_by(Monitor.created_at, Monitor.id)
+                    .offset(offset)
+                    .limit(limit)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return JSONResponse(content={"monitors": [_monitor_state(row) for row in rows]})
+
+
+async def _set_monitor_active(
+    monitor_id: UUID, active: bool, session_factory: async_sessionmaker | None
+) -> JSONResponse:
+    request_id = f"req_{uuid4().hex}"
+    if session_factory is None:
+        return JSONResponse(
+            status_code=503,
+            content=_error(
+                "database_unavailable", "No durable store is configured.", request_id
+            ),
+        )
+    async with session_factory() as session:
+        monitor = await session.get(Monitor, monitor_id, with_for_update=True)
+        if monitor is None:
+            return JSONResponse(
+                status_code=404,
+                content=_error("monitor_not_found", "No such monitor.", request_id),
+            )
+        monitor.active = active
+        if active:
+            monitor.next_run_at = datetime.now(timezone.utc) + timedelta(
+                minutes=monitor.interval_minutes
+            )
+        await session.commit()
+        return JSONResponse(content=_monitor_state(monitor))
+
+
+@app.post("/v1/monitors/{monitor_id}/pause")
+async def pause_monitor(
+    monitor_id: UUID,
+    session_factory: async_sessionmaker | None = Depends(get_session_factory),
+) -> JSONResponse:
+    return await _set_monitor_active(monitor_id, False, session_factory)
+
+
+@app.post("/v1/monitors/{monitor_id}/resume")
+async def resume_monitor(
+    monitor_id: UUID,
+    session_factory: async_sessionmaker | None = Depends(get_session_factory),
+) -> JSONResponse:
+    return await _set_monitor_active(monitor_id, True, session_factory)
 
 
 # @spec[RANCHO_FINDALL_AND_MONITORS.md#requirements]

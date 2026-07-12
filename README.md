@@ -154,6 +154,15 @@ least 16 characters. Alerts contain only monitor/run IDs, outcome, change flag, 
 time. They use `X-Rancho-Signature: sha256=<HMAC>` over the exact JSON body, follow no redirects,
 and use a five-second timeout. Secrets and raw delivery errors never appear in responses.
 
+The worker checks due monitors every five minutes. A due occurrence creates exactly one linked
+FindAll task under a database uniqueness constraint, advances from the scheduled timestamp, and
+redispatches queued monitor tasks after worker restarts. When that task completes, its immutable
+monitor run and webhook outcome are finalized automatically. Duplicate queue delivery is safe.
+
+Use `GET /v1/monitors?limit=20&offset=0` for a bounded schedule list. Pause or resume a schedule
+idempotently with `POST /v1/monitors/<monitor_id>/pause` and
+`POST /v1/monitors/<monitor_id>/resume`; resuming establishes a fresh next occurrence.
+
 ## Running with Docker Compose
 
 The [`docker-compose.yml`](docker-compose.yml) stack runs the API together with its trusted
