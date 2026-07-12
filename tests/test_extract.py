@@ -218,6 +218,22 @@ def test_non_success_status_is_refused() -> None:
 
 
 # @spec[RANCHO_CONTENT_EXTRACTION.md#requirements]
+def test_network_failure_is_normalized_to_typed_unavailable() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("TLS verification failed", request=request)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    fetcher = WebContentFetcher(
+        client=client, resolver=_resolver_for({"public.example": "93.184.216.34"})
+    )
+    try:
+        with pytest.raises(ContentUnavailableError):
+            fetcher.fetch("https://public.example/tls-error")
+    finally:
+        client.close()
+
+
+# @spec[RANCHO_CONTENT_EXTRACTION.md#requirements]
 def test_html_to_markdown_strips_script_and_preserves_evidence() -> None:
     html = """
     <html><body>

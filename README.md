@@ -7,7 +7,7 @@ The detailed project specification is in
 
 ## Current capability
 
-The Phase 1 compatibility foundation is available now:
+The complete self-hosted research pipeline is available now:
 
 - `POST /v1/search` and `/search` accept bounded Parkour-compatible search requests.
 - A configured, trusted internal SearXNG provider supplies normalized, deduplicated results.
@@ -15,11 +15,14 @@ The Phase 1 compatibility foundation is available now:
 - An unconfigured or failed provider returns a redacted HTTP 503 `provider_unavailable` response;
   Rancho never invents search results.
 - The local Ollama/vLLM client uses a fixed OpenAI-compatible completion endpoint, bounded retries,
-  internally selected models, and typed unavailable failures. It is available for later synthesis
-  stages but is not yet part of the synchronous search response.
+  internally selected models, and typed unavailable failures.
+- Durable asynchronous research performs bounded planning, search, safe extraction, iterative
+  coverage evaluation, verified claim synthesis, and canonical citation rendering.
+- FindAll provides evidence-linked structured discovery, while recurring monitors persist
+  snapshots, detect material changes, and optionally deliver signed HTTPS webhooks.
 
-DuckDuckGo, local LLM synthesis, extraction/crawling, and asynchronous research tasks are still
-in development. See [TODO.md](TODO.md) for the current delivery checklist.
+Optional scale, caching, tenant controls, and richer observability remain on the roadmap. See
+[TODO.md](TODO.md) for the current delivery checklist.
 
 ## Local development
 
@@ -73,6 +76,12 @@ match retained evidence. The final result renders citations from canonical store
 claim persistence succeed. Missing evidence, an unavailable model, malformed output, or no
 verified claims produces an honest `partial` result with a redacted terminal event.
 
+Some local models wrap requested JSON in a Markdown fence or a short explanation. Rancho accepts
+that transport wrapper only when the response contains exactly one JSON object. It then applies
+the same exact schema, task ownership, evidence UUID, field type, and canonical URL checks; multiple
+objects, malformed structures, substituted URLs, and unsupported content remain unavailable or
+are omitted.
+
 The task status response includes `evidence_count`, `claim_count`, and `result`. A positive claim
 count is auditable through the UUIDs embedded in the canonical citations; unsupported generated
 claims never appear in the result or durable claim table.
@@ -98,8 +107,16 @@ task's retained evidence, and `completed` must have a positive `claim_count`.
 
 The loop budgets are configured with `RANCHO_RESEARCH_MAX_ITERATIONS`,
 `RANCHO_RESEARCH_MAX_ELAPSED_SECONDS`, `RANCHO_RESEARCH_MAX_PLANNER_TOKENS`, and
-`RANCHO_RESEARCH_MAX_MODEL_TOKENS`. `RANCHO_RESEARCH_PLANNING=true` enables an initial planning
-pass; iterative evidence evaluation remains bounded by the same limits.
+`RANCHO_RESEARCH_MAX_MODEL_TOKENS`. Initial planning is enabled by default and can be disabled
+with `RANCHO_RESEARCH_PLANNING=false`; iterative evidence evaluation remains bounded by the same
+limits. Planning directs the model toward official documentation, maintainers, standards bodies,
+government sources, and original research, including focused `site:` queries when an authoritative
+organization is clear.
+
+SearXNG is the primary self-hosted retrieval substrate. Optional DuckDuckGo and Bing adapters are
+best treated as opportunistic resilience inputs because upstream access and API quotas change;
+Rancho does not require either one for correctness. A DDGS-backed adapter or a managed search API
+can be added later behind the existing bounded orchestrator when an operator needs more recall.
 
 ## FindAll candidate discovery
 

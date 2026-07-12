@@ -120,7 +120,12 @@ class WebContentFetcher:
         client = self._client or httpx.Client(follow_redirects=False)
         owns_client = self._client is None
         try:
-            return self._follow(url, client)
+            try:
+                return self._follow(url, client)
+            except ContentUnavailableError:
+                raise
+            except (httpx.HTTPError, OSError, ValueError) as error:
+                raise ContentUnavailableError from error
         finally:
             if owns_client:
                 client.close()

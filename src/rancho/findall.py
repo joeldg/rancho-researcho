@@ -14,7 +14,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from rancho.db_models import EventType, Evidence, ResearchTask, TaskEvent
 from rancho.llm import LLMUnavailableError, LocalLLMClient
+from rancho.prompt_budget import serialize_bounded_evidence_payload
 from rancho.research import ResearchConflictError
+from rancho.structured_output import StructuredOutputError, parse_single_json_object
 
 
 class FindAllUnavailableError(Exception):
@@ -93,7 +95,12 @@ def extract_candidates(
     if not evidence:
         raise FindAllUnavailableError
     bundle = [
-        {"evidence_id": str(item.id), "content": item.content[:2000]}
+        {
+            "evidence_id": str(item.id),
+            "canonical_url": item.canonical_url,
+            "title": item.title,
+            "content": item.content,
+        }
         for item in evidence
     ]
     try:
@@ -111,9 +118,8 @@ def extract_candidates(
                 },
                 {
                     "role": "user",
-                    "content": json.dumps(
-                        {"objective": objective, "schema": schema, "evidence": bundle},
-                        separators=(",", ":"),
+                    "content": serialize_bounded_evidence_payload(
+                        {"objective": objective, "schema": schema, "evidence": bundle}
                     ),
                 },
             ],
@@ -129,8 +135,8 @@ def validate_candidates(
     response: str, schema: dict[str, str], evidence: list[Evidence]
 ) -> list[VerifiedCandidate]:
     try:
-        payload = json.loads(response)
-    except (TypeError, ValueError) as error:
+        payload = parse_single_json_object(response)
+    except StructuredOutputError as error:
         raise FindAllUnavailableError from error
     if (
         not isinstance(payload, dict)

@@ -73,6 +73,9 @@ Goal: Establish the worker queue, database schemas, stateful agent research loop
   - [x] Validate that every claim is backed by at least one retained, task-owned `Evidence` UUID.
   - [x] Persist verified claims and render claim-level canonical citations in the task result.
 - [x] Ensure the final synthesis cannot cite any URL absent from the task's `Evidence` store.
+- [x] Accept one JSON object wrapped in common local-model prose/Markdown while preserving exact
+  schema, task ownership, evidence UUID, and canonical URL verification.
+- [x] Bound synthesis and FindAll evidence prompts across the full retained source set.
 
 ### 2.4 Server-Sent Events (SSE) Streaming
 - [x] Create SSE endpoint `GET /v1/tasks/{task_id}/events` supporting connection recovery (`Last-Event-ID`).
@@ -117,7 +120,13 @@ Goal: Secure, optimize, and scale the local agent for production workloads.
 - [ ] Ensure full containment of outbound HTTP requests (SSRF validation at DNS resolution and socket connection level).
 
 ### 4.3 Reliability & Resilience
+- [x] Keep controlled worker execution isolated from ambient local-LLM configuration.
+- [x] Convert network/TLS fetch failures to typed unavailable evidence outcomes and guarantee a
+  redacted durable `failed` terminal state for unexpected worker defects.
 - [ ] Implement circuit breakers for local LLM requests to prevent CPU/OOM locking under heavy load.
+- [ ] Optionally add a DDGS-backed or managed-search adapter for recall resilience; keep SearXNG
+  as the self-hosted primary and do not make Bing or DuckDuckGo API availability a correctness
+  dependency.
 - [ ] Add rate-limiting policies per tenant and token allocation caps.
 - [ ] Signed webhooks (HMAC-SHA256 signature verification) for callback security.
 

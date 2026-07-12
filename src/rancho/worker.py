@@ -60,7 +60,9 @@ async def run_research_task(ctx: dict[str, Any], task_id: str) -> None:
             return
 
         search = ctx.get("search") or _configured_search(settings)
-        llm = ctx.get("llm") or get_local_llm_client(settings)
+        # Explicit injection, including None, wins over ambient configuration.
+        # This keeps controlled workers and tests isolated from a developer .env.
+        llm = ctx["llm"] if "llm" in ctx else get_local_llm_client(settings)
         model_tokens_remaining = settings.research_max_model_tokens
         queries = [task.objective]
         if settings.research_planning or task.task_type == "findall":
@@ -179,6 +181,11 @@ async def run_research_task(ctx: dict[str, Any], task_id: str) -> None:
             await finalize_monitor_task(factory, task.id)
             return
         await _verify_and_finish(factory, task.id, llm, synthesis_tokens)
+    except Exception:
+        # No provider, parser, or fetch defect may strand durable work in
+        # ``running``. The event is deliberately redacted; arq still receives
+        # a successful return because PostgreSQL now records the honest result.
+        await _finish_failed(factory, UUID(task_id))
     finally:
         if engine is not None:
             await engine.dispose()
@@ -358,6 +365,23 @@ async def _finish_partial(
             EventType.task_partial,
             "synthesis",
             {"reason": reason},
+        )
+        await session.commit()
+
+
+async def _finish_failed(factory: async_sessionmaker, task_id: UUID) -> None:
+    """Durably terminate an unexpected worker failure without leaking details."""
+    async with factory() as session:
+        task = await session.get(ResearchTask, task_id, with_for_update=True)
+        if task is None or task.status is not TaskStatus.running:
+            return
+        task.status = TaskStatus.failed
+        await _append_event(
+            session,
+            task.id,
+            EventType.task_failed,
+            "research",
+            {"reason": "internal_unavailable"},
         )
         await session.commit()
 
