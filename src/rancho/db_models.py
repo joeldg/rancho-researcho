@@ -124,6 +124,12 @@ class ResearchTask(Base):
     idempotency_key: Mapped[str | None] = mapped_column(String(200), nullable=True)
     request_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
     final_result: Mapped[str | None] = mapped_column(Text, nullable=True)
+    monitor_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("monitors.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    scheduled_for: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -148,6 +154,9 @@ class ResearchTask(Base):
 
     __table_args__ = (
         UniqueConstraint("idempotency_key", name="uq_research_tasks_idempotency_key"),
+        UniqueConstraint(
+            "monitor_id", "scheduled_for", name="uq_monitor_scheduled_occurrence"
+        ),
     )
 
 
@@ -261,11 +270,13 @@ class MonitorRun(Base):
     evidence_hashes: Mapped[dict] = mapped_column(JSON)
     outcome: Mapped[str] = mapped_column(String(32))
     material_change: Mapped[bool] = mapped_column(Boolean)
+    webhook_status: Mapped[str] = mapped_column(String(32), default="not_required")
     next_run_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
     monitor: Mapped[Monitor] = relationship(back_populates="runs")
+    __table_args__ = (UniqueConstraint("task_id", name="uq_monitor_runs_task_id"),)
 
 
 # @spec[RANCHO_ASYNC_RESEARCH.md#architecture-and-storage]

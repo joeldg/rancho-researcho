@@ -93,7 +93,7 @@ Goal: Implement structured candidate extraction and scheduled tracking monitors.
   - [x] Record validated match status, bounded reasoning, and evidence IDs for each persisted candidate.
 
 ### 3.2 Recurring Monitor Scheduler
-- [ ] Implement scheduler (e.g., APScheduler) to run periodic monitoring jobs.
+- [x] Implement an `arq` cron scheduler with durable due-occurrence claiming, restart recovery, and duplicate-safe dispatch.
 - [x] Implement idempotent `POST /v1/monitors` and durable monitor-run recording endpoints.
 - [ ] Implement change detection engine:
   - [x] Compare sorted retained canonical URLs and content hashes with the previous run.

@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
+from arq import cron
 from arq.connections import RedisSettings
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -28,6 +29,7 @@ from rancho.evaluation import EvaluationUnavailableError, evaluate_evidence
 from rancho.extract import ContentUnavailableError, WebContentFetcher
 from rancho.findall import FindAllUnavailableError, extract_candidates
 from rancho.llm import get_local_llm_client
+from rancho.monitors import finalize_monitor_task, launch_due_monitors
 from rancho.planning import plan_queries
 from rancho.search import (
     OrchestratedSearch,
@@ -174,6 +176,7 @@ async def run_research_task(ctx: dict[str, Any], task_id: str) -> None:
                 task.output_schema or {},
                 synthesis_tokens,
             )
+            await finalize_monitor_task(factory, task.id)
             return
         await _verify_and_finish(factory, task.id, llm, synthesis_tokens)
     finally:
@@ -508,10 +511,36 @@ async def _append_event(
     )
 
 
+# @spec[RANCHO_FINDALL_AND_MONITORS.md#requirements]
+async def run_due_monitors(ctx: dict[str, Any]) -> int:
+    """Cron entry point that durably launches due monitor occurrences."""
+    settings = ctx.get("settings") or get_settings()
+    factory, engine = _session_factory(ctx, settings)
+    if factory is None:
+        return 0
+    redis = ctx.get("redis")
+
+    async def enqueue(task_id: UUID) -> None:
+        if redis is not None:
+            await redis.enqueue_job("run_research_task", str(task_id))
+
+    try:
+        return len(await launch_due_monitors(factory, enqueue))
+    finally:
+        if engine is not None:
+            await engine.dispose()
+
+
 class WorkerSettings:
     """arq entry point for the trusted Redis-backed worker."""
 
-    functions = [run_research_task]
+    functions = [run_research_task, run_due_monitors]
+    cron_jobs = [
+        cron(
+            run_due_monitors,
+            minute={0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55},
+        )
+    ]
     redis_settings = RedisSettings.from_dsn(
         get_settings().redis_url or "redis://localhost:6379/0"
     )

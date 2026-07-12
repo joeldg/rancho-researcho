@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -10,9 +11,17 @@ from urllib.parse import urlsplit
 
 import httpx
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from rancho.db_models import Evidence, Monitor, MonitorRun, ResearchTask, TaskStatus
+from rancho.db_models import (
+    EventType,
+    Evidence,
+    Monitor,
+    MonitorRun,
+    ResearchTask,
+    TaskEvent,
+    TaskStatus,
+)
 from rancho.research import ResearchConflictError
 
 _WEBHOOK_TIMEOUT = httpx.Timeout(5.0)
@@ -106,12 +115,130 @@ async def record_monitor_run(
         evidence_hashes=snapshot,
         outcome="changed" if material_change else "unchanged",
         material_change=material_change,
+        webhook_status="pending"
+        if material_change and monitor.webhook_url
+        else "not_required",
         next_run_at=next_run,
     )
     monitor.next_run_at = next_run
     session.add(run)
     await session.commit()
     return run
+
+
+# @spec[RANCHO_FINDALL_AND_MONITORS.md#requirements]
+async def launch_due_monitors(
+    factory: async_sessionmaker,
+    enqueue,
+    now: datetime | None = None,
+    limit: int = 100,
+) -> list[ResearchTask]:
+    """Create one durable FindAll task per due occurrence and dispatch queued work."""
+    observed = now or datetime.now(timezone.utc)
+    async with factory() as session:
+        pending = list(
+            (
+                await session.execute(
+                    select(ResearchTask).where(
+                        ResearchTask.monitor_id.is_not(None),
+                        ResearchTask.status == TaskStatus.queued,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        due = list(
+            (
+                await session.execute(
+                    select(Monitor)
+                    .where(Monitor.active.is_(True), Monitor.next_run_at <= observed)
+                    .order_by(Monitor.next_run_at)
+                    .limit(limit)
+                    .with_for_update(skip_locked=True)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        created = []
+        for monitor in due:
+            scheduled_for = monitor.next_run_at
+            if scheduled_for.tzinfo is None:
+                scheduled_for = scheduled_for.replace(tzinfo=timezone.utc)
+            task = ResearchTask(
+                objective=monitor.objective,
+                task_type="findall",
+                output_schema=monitor.output_schema,
+                budget_max_sources=10,
+                monitor_id=monitor.id,
+                scheduled_for=scheduled_for,
+                idempotency_key=f"monitor:{monitor.id}:{scheduled_for.isoformat()}",
+                request_fingerprint=monitor.request_fingerprint,
+            )
+            session.add(task)
+            await session.flush()
+            session.add(
+                TaskEvent(
+                    task_id=task.id,
+                    sequence=1,
+                    type=EventType.task_created,
+                    stage="created",
+                    payload={
+                        "status": "queued",
+                        "task_type": "findall",
+                        "monitor": True,
+                    },
+                )
+            )
+            next_run = scheduled_for
+            while next_run <= observed:
+                next_run += timedelta(minutes=monitor.interval_minutes)
+            monitor.next_run_at = next_run
+            created.append(task)
+        await session.commit()
+    jobs = {task.id: task for task in [*pending, *created]}
+    for task in jobs.values():
+        await enqueue(task.id)
+    return created
+
+
+# @spec[RANCHO_FINDALL_AND_MONITORS.md#requirements]
+async def finalize_monitor_task(
+    factory: async_sessionmaker, task_id
+) -> MonitorRun | None:
+    """Create at most one monitor run for a completed generated task."""
+    async with factory() as session:
+        task = await session.get(ResearchTask, task_id)
+        if (
+            task is None
+            or task.monitor_id is None
+            or task.status is not TaskStatus.completed
+        ):
+            return None
+        existing = await session.scalar(
+            select(MonitorRun).where(MonitorRun.task_id == task.id)
+        )
+        if existing is not None:
+            return existing
+        monitor = await session.get(Monitor, task.monitor_id)
+        evidence = list(
+            (await session.execute(select(Evidence).where(Evidence.task_id == task.id)))
+            .scalars()
+            .all()
+        )
+        if monitor is None:
+            return None
+        run = await record_monitor_run(
+            session, monitor, task, evidence, now=task.scheduled_for
+        )
+        try:
+            delivered = await asyncio.to_thread(deliver_webhook, monitor, run)
+            run.webhook_status = "delivered" if delivered else "not_required"
+        except WebhookDeliveryError:
+            run.webhook_status = "failed"
+        await session.commit()
+        return run
 
 
 # @spec[RANCHO_FINDALL_AND_MONITORS.md#requirements]

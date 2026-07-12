@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 
 import httpx
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from rancho.db import Base
@@ -17,6 +18,8 @@ from rancho.monitors import (
     WebhookDeliveryError,
     deliver_webhook,
     evidence_snapshot,
+    finalize_monitor_task,
+    launch_due_monitors,
     record_monitor_run,
 )
 
@@ -148,3 +151,81 @@ def test_webhook_rejects_insecure_or_credentialed_urls():
         )
         with pytest.raises(WebhookDeliveryError):
             deliver_webhook(monitor, run)
+
+
+def test_due_launcher_is_unique_and_recovers_queued_dispatch(tmp_path):
+    async def scenario():
+        engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'due.db'}")
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        factory = async_sessionmaker(engine, expire_on_commit=False)
+        now = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+        async with factory() as session:
+            monitor = Monitor(
+                objective="watch",
+                output_schema={"name": "string"},
+                interval_minutes=60,
+                request_fingerprint="0" * 64,
+                next_run_at=datetime(2026, 1, 1, 10, 30, tzinfo=timezone.utc),
+            )
+            session.add(monitor)
+            await session.commit()
+            monitor_id = monitor.id
+        dispatched = []
+
+        async def enqueue(task_id):
+            dispatched.append(task_id)
+
+        first = await launch_due_monitors(factory, enqueue, now=now)
+        second = await launch_due_monitors(factory, enqueue, now=now)
+        async with factory() as session:
+            tasks = list((await session.execute(select(ResearchTask))).scalars().all())
+            monitor = await session.get(Monitor, monitor_id)
+        await engine.dispose()
+        return first, second, tasks, monitor, dispatched
+
+    first, second, tasks, monitor, dispatched = asyncio.run(scenario())
+    assert len(first) == 1 and second == [] and len(tasks) == 1
+    assert tasks[0].scheduled_for.isoformat().startswith("2026-01-01T10:30")
+    assert monitor.next_run_at.isoformat().startswith("2026-01-01T12:30")
+    assert dispatched == [tasks[0].id, tasks[0].id]
+
+
+def test_monitor_task_finalization_is_idempotent(tmp_path):
+    async def scenario():
+        engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'final.db'}")
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with factory() as session:
+            monitor = Monitor(
+                objective="watch",
+                output_schema={"name": "string"},
+                interval_minutes=60,
+                request_fingerprint="0" * 64,
+                next_run_at=datetime.now(timezone.utc),
+            )
+            session.add(monitor)
+            await session.flush()
+            task = ResearchTask(
+                objective="watch",
+                task_type="findall",
+                status=TaskStatus.completed,
+                monitor_id=monitor.id,
+                scheduled_for=datetime.now(timezone.utc),
+            )
+            session.add(task)
+            await session.flush()
+            session.add(_evidence(task.id, "https://a", "1" * 64))
+            await session.commit()
+            task_id = task.id
+        first = await finalize_monitor_task(factory, task_id)
+        second = await finalize_monitor_task(factory, task_id)
+        async with factory() as session:
+            runs = list((await session.execute(select(MonitorRun))).scalars().all())
+        await engine.dispose()
+        return first, second, runs
+
+    first, second, runs = asyncio.run(scenario())
+    assert first.id == second.id and len(runs) == 1
+    assert runs[0].webhook_status == "not_required"

@@ -316,3 +316,26 @@ def test_retry_requeues_partial_task_and_enforces_attempt_cap(client) -> None:
     rejected = test_client.post(f"/v1/tasks/{task_id}/retry")
     assert rejected.status_code == 409
     assert rejected.json()["error"]["code"] == "retry_not_allowed"
+
+
+def test_monitor_list_pause_and_resume_are_bounded_and_idempotent(client) -> None:
+    test_client, _ = client
+    created = test_client.post(
+        "/v1/monitors",
+        json={
+            "objective": "watch",
+            "output_schema": {"name": "string"},
+            "interval_minutes": 60,
+        },
+    ).json()
+    monitor_id = created["monitor_id"]
+    listing = test_client.get("/v1/monitors?limit=1&offset=0")
+    paused = test_client.post(f"/v1/monitors/{monitor_id}/pause")
+    paused_again = test_client.post(f"/v1/monitors/{monitor_id}/pause")
+    resumed = test_client.post(f"/v1/monitors/{monitor_id}/resume")
+
+    assert len(listing.json()["monitors"]) == 1
+    assert paused.json()["active"] is False
+    assert paused_again.json()["active"] is False
+    assert resumed.json()["active"] is True
+    assert test_client.get("/v1/monitors?limit=101").status_code == 422
