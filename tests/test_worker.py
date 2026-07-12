@@ -99,14 +99,15 @@ def test_worker_persists_safe_evidence_and_ordered_redacted_events(tmp_path):
     assert [(event.sequence, event.type.value) for event in events] == [
         (1, "task.created"),
         (2, "stage.started"),
-        (3, "search.completed"),
-        (4, "evidence.extracted"),
+        (3, "progress"),
+        (4, "search.completed"),
         (5, "evidence.extracted"),
-        (6, "task.partial"),
+        (6, "evidence.extracted"),
+        (7, "task.partial"),
     ]
-    assert events[3].payload == {"source_id": "src_01", "outcome": "stored"}
-    assert events[4].payload == {"source_id": "src_02", "outcome": "unavailable"}
-    assert "example2" not in str(events[4].payload)
+    assert events[4].payload == {"source_id": "src_01", "outcome": "stored"}
+    assert events[5].payload == {"source_id": "src_02", "outcome": "unavailable"}
+    assert "example2" not in str(events[5].payload)
 
 
 def test_worker_honestly_completes_partial_when_search_is_unavailable(tmp_path):
@@ -144,5 +145,5 @@ def test_worker_honestly_completes_partial_when_search_is_unavailable(tmp_path):
     task, events = asyncio.run(scenario())
 
     assert task.status is TaskStatus.partial
-    assert events[2].payload == {"result_count": 0, "degraded": True}
+    assert events[3].payload == {"result_count": 0, "degraded": True}
     assert events[-1].payload == {"reason": "synthesis_not_implemented"}

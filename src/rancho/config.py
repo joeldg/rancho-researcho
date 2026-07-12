@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     llm_api_key: str | None = None
     llm_model: str | None = None
     llm_complex_model: str | None = None
+    research_planning: bool = False
+    research_max_iterations: int = Field(default=2, ge=1, le=5)
+    research_max_elapsed_seconds: int = Field(default=120, ge=5, le=600)
+    research_max_planner_tokens: int = Field(default=256, ge=32, le=1024)
     database_url: str | None = None
     redis_url: str | None = None
 
@@ -42,7 +46,7 @@ class Settings(BaseSettings):
             return None
         for prefix in ("postgresql://", "postgres://"):
             if self.database_url.startswith(prefix):
-                return "postgresql+asyncpg://" + self.database_url[len(prefix):]
+                return "postgresql+asyncpg://" + self.database_url[len(prefix) :]
         return self.database_url
 
     # @spec[RANCHO_SEARCH_ORCHESTRATION.md#requirements]
