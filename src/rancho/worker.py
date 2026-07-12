@@ -23,6 +23,7 @@ from rancho.db_models import (
     TaskEvent,
     TaskStatus,
 )
+from rancho.evaluation import EvaluationUnavailableError, evaluate_evidence
 from rancho.extract import ContentUnavailableError, WebContentFetcher
 from rancho.llm import get_local_llm_client
 from rancho.planning import plan_queries
@@ -55,12 +56,19 @@ async def run_research_task(ctx: dict[str, Any], task_id: str) -> None:
             return
 
         search = ctx.get("search") or _configured_search(settings)
+        llm = ctx.get("llm") or get_local_llm_client(settings)
+        model_tokens_remaining = settings.research_max_model_tokens
         queries = [task.objective]
         if settings.research_planning:
-            llm = ctx.get("llm") or get_local_llm_client(settings)
             if llm is None:
-                await _finish_partial(factory, task.id)
+                await _finish_partial(factory, task.id, "model_unavailable")
                 return
+            if await _cancel_at_boundary(factory, task.id):
+                return
+            if model_tokens_remaining < settings.research_max_planner_tokens:
+                await _finish_partial(factory, task.id, "model_budget_exhausted")
+                return
+            model_tokens_remaining -= settings.research_max_planner_tokens
             queries = await asyncio.to_thread(
                 plan_queries,
                 llm,
@@ -68,40 +76,99 @@ async def run_research_task(ctx: dict[str, Any], task_id: str) -> None:
                 settings.research_max_iterations,
                 settings.research_max_planner_tokens,
             )
+            if await _cancel_at_boundary(factory, task.id):
+                return
             if not queries:
-                await _finish_partial(factory, task.id)
+                await _finish_partial(factory, task.id, "planning_unavailable")
                 return
         fetcher = ctx.get("fetcher") or WebContentFetcher()
         started = time.monotonic()
         seen_urls: set[str] = set()
         remaining = task.budget_max_sources
-        for iteration, query in enumerate(queries, start=1):
+        iteration = 0
+        research_incomplete = False
+        while queries and iteration < settings.research_max_iterations:
             if time.monotonic() - started >= settings.research_max_elapsed_seconds:
+                research_incomplete = True
                 break
-            if await _is_cancel_requested(factory, task.id):
-                await _finish_cancelled(factory, task.id)
+            if await _cancel_at_boundary(factory, task.id):
                 return
+            iteration += 1
+            query = queries.pop(0)
             await _record_progress(factory, task.id, iteration)
             outcome = await _search_once(search, query, remaining)
+            if await _cancel_at_boundary(factory, task.id):
+                return
             await _record_search_outcome(factory, task.id, outcome)
+            research_incomplete = research_incomplete or bool(outcome.warnings)
             for result in outcome.results:
                 url = str(result.url)
                 if url in seen_urls or remaining <= 0:
                     continue
                 seen_urls.add(url)
-                if await _is_cancel_requested(factory, task.id):
-                    await _finish_cancelled(factory, task.id)
+                if await _cancel_at_boundary(factory, task.id):
                     return
-                await _collect_evidence(factory, task.id, result, fetcher)
+                canonical_url = await _collect_evidence(
+                    factory, task.id, result, fetcher
+                )
                 remaining -= 1
+                if canonical_url:
+                    seen_urls.add(canonical_url)
+                if await _cancel_at_boundary(factory, task.id):
+                    return
             if remaining <= 0:
                 break
+            remaining_iterations = settings.research_max_iterations - iteration
+            if llm is not None and remaining_iterations > 0:
+                if await _cancel_at_boundary(factory, task.id):
+                    return
+                evidence = await _task_evidence(factory, task.id)
+                if model_tokens_remaining < settings.research_max_planner_tokens:
+                    await _finish_partial(
+                        factory, task.id, "model_budget_exhausted"
+                    )
+                    return
+                model_tokens_remaining -= settings.research_max_planner_tokens
+                try:
+                    evaluation = await asyncio.to_thread(
+                        evaluate_evidence,
+                        llm,
+                        task.objective,
+                        evidence,
+                        remaining_iterations,
+                        settings.research_max_planner_tokens,
+                    )
+                except EvaluationUnavailableError:
+                    await _finish_partial(factory, task.id, "evaluation_unavailable")
+                    return
+                if await _cancel_at_boundary(factory, task.id):
+                    return
+                if evaluation.complete:
+                    queries.clear()
+                else:
+                    queued = set(queries)
+                    secondary = [
+                        query
+                        for query in evaluation.queries
+                        if query not in queued
+                    ]
+                    queries[0:0] = secondary
 
-        llm = ctx.get("llm") or get_local_llm_client(settings)
+        if research_incomplete:
+            await _finish_partial(factory, task.id, "research_incomplete")
+            return
         if llm is None:
             await _finish_partial(factory, task.id, "verification_unavailable")
             return
-        await _verify_and_finish(factory, task.id, llm, settings)
+        synthesis_tokens = min(
+            settings.research_max_planner_tokens * 4,
+            model_tokens_remaining,
+            2048,
+        )
+        if synthesis_tokens < 1:
+            await _finish_partial(factory, task.id, "model_budget_exhausted")
+            return
+        await _verify_and_finish(factory, task.id, llm, synthesis_tokens)
     finally:
         if engine is not None:
             await engine.dispose()
@@ -187,13 +254,13 @@ async def _collect_evidence(
     task_id: UUID,
     result: Any,
     fetcher: WebContentFetcher | Any,
-) -> None:
+) -> str | None:
     """Safely fetch one result and persist evidence only after success."""
     try:
         page = await asyncio.to_thread(fetcher.fetch, str(result.url))
     except ContentUnavailableError:
         await _record_fetch_skip(factory, task_id, result.source_id)
-        return
+        return None
 
     content = page.markdown
     async with factory() as session:
@@ -217,6 +284,7 @@ async def _collect_evidence(
             {"source_id": result.source_id, "outcome": "stored"},
         )
         await session.commit()
+    return page.final_url
 
 
 async def _record_fetch_skip(
@@ -241,6 +309,32 @@ async def _is_cancel_requested(factory: async_sessionmaker, task_id: UUID) -> bo
         return task is not None and task.status is TaskStatus.cancel_requested
 
 
+async def _cancel_at_boundary(factory: async_sessionmaker, task_id: UUID) -> bool:
+    """Finish cancellation before or after an external/model stage."""
+    if not await _is_cancel_requested(factory, task_id):
+        return False
+    await _finish_cancelled(factory, task_id)
+    return True
+
+
+async def _task_evidence(
+    factory: async_sessionmaker, task_id: UUID
+) -> list[Evidence]:
+    """Load only retained evidence owned by one task for model evaluation."""
+    async with factory() as session:
+        return list(
+            (
+                await session.execute(
+                    select(Evidence)
+                    .where(Evidence.task_id == task_id)
+                    .order_by(Evidence.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+
 async def _finish_partial(
     factory: async_sessionmaker, task_id: UUID, reason: str = "verification_incomplete"
 ) -> None:
@@ -262,21 +356,16 @@ async def _finish_partial(
 
 # @spec[RANCHO_CLAIM_VERIFICATION.md#requirements]
 async def _verify_and_finish(
-    factory: async_sessionmaker, task_id: UUID, llm: Any, settings: Settings
+    factory: async_sessionmaker,
+    task_id: UUID,
+    llm: Any,
+    max_output_tokens: int,
 ) -> None:
     """Persist only verified claims and complete atomically after verification."""
+    if await _cancel_at_boundary(factory, task_id):
+        return
+    evidence = await _task_evidence(factory, task_id)
     async with factory() as session:
-        evidence = (
-            (
-                await session.execute(
-                    select(Evidence)
-                    .where(Evidence.task_id == task_id)
-                    .order_by(Evidence.id)
-                )
-            )
-            .scalars()
-            .all()
-        )
         task = await session.get(ResearchTask, task_id)
         if task is None:
             return
@@ -287,10 +376,12 @@ async def _verify_and_finish(
             llm,
             objective,
             list(evidence),
-            min(settings.research_max_planner_tokens * 4, 2048),
+            max_output_tokens,
         )
     except VerificationUnavailableError:
         await _finish_partial(factory, task_id, "verification_unavailable")
+        return
+    if await _cancel_at_boundary(factory, task_id):
         return
     if not verified:
         await _finish_partial(factory, task_id, "no_verified_claims")
