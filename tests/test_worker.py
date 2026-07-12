@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from rancho.db import Base
-from rancho.db_models import Evidence, ResearchTask, TaskEvent, TaskStatus
+from rancho.db_models import Claim, Evidence, ResearchTask, TaskEvent, TaskStatus
 from rancho.extract import ContentUnavailableError, FetchedPage
 from rancho.models import SearchResult
 from rancho.research import create_or_get_research_task
@@ -146,4 +146,88 @@ def test_worker_honestly_completes_partial_when_search_is_unavailable(tmp_path):
 
     assert task.status is TaskStatus.partial
     assert events[3].payload == {"result_count": 0, "degraded": True}
-    assert events[-1].payload == {"reason": "synthesis_not_implemented"}
+    assert events[-1].payload == {"reason": "verification_unavailable"}
+
+
+# @spec[RANCHO_CLAIM_VERIFICATION.md#acceptance-evidence]
+def test_worker_persists_verified_claims_and_completes_after_verification(tmp_path):
+    async def scenario():
+        engine = create_async_engine(
+            f"sqlite+aiosqlite:///{tmp_path / 'verified.db'}", poolclass=NullPool
+        )
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with factory() as session:
+            task, _ = await create_or_get_research_task(session, "verified", 1, None)
+        result = _result(1)
+        fetcher = _Fetcher(
+            {
+                str(result.url): FetchedPage(
+                    final_url=str(result.url), markdown="A retained fact."
+                )
+            }
+        )
+
+        # Run collection first with a model that learns the generated evidence UUID
+        # from the prompt and returns one supported candidate.
+        class _EvidenceAwareLLM:
+            def complete(self, messages, **kwargs):
+                import json
+
+                del kwargs
+                bundle = json.loads(messages[1]["content"])["evidence"]
+                item = bundle[0]
+                return json.dumps(
+                    {
+                        "claims": [
+                            {
+                                "text": "A verified fact",
+                                "evidence_ids": [item["evidence_id"]],
+                                "citation_urls": [item["canonical_url"]],
+                            },
+                            {
+                                "text": "Unsupported model text",
+                                "evidence_ids": [],
+                                "citation_urls": [],
+                            },
+                        ]
+                    }
+                )
+
+        await run_research_task(
+            {
+                "session_factory": factory,
+                "search": _Search([result]),
+                "fetcher": fetcher,
+                "llm": _EvidenceAwareLLM(),
+            },
+            str(task.id),
+        )
+        async with factory() as session:
+            persisted = await session.get(ResearchTask, task.id)
+            claims = (await session.execute(select(Claim))).scalars().all()
+            events = (
+                (
+                    await session.execute(
+                        select(TaskEvent)
+                        .where(TaskEvent.task_id == task.id)
+                        .order_by(TaskEvent.sequence)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        await engine.dispose()
+        return persisted, claims, events
+
+    task, claims, events = asyncio.run(scenario())
+
+    assert task.status is TaskStatus.completed
+    assert [claim.text for claim in claims] == ["A verified fact"]
+    assert "Unsupported model text" not in task.final_result
+    assert "https://example1.com/article" in task.final_result
+    assert [event.type.value for event in events[-2:]] == [
+        "claim.verified",
+        "task.completed",
+    ]

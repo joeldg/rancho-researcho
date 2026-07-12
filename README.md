@@ -59,11 +59,17 @@ curl -sS http://127.0.0.1:8000/v1/tasks/<task_id>
 curl -NsS http://127.0.0.1:8000/v1/tasks/<task_id>/events
 ```
 
-The worker now performs one bounded search-and-fetch pass. The final status is still `partial`
-because planning, claim verification, and synthesis are the next slices. A positive
-`evidence_count` means safely fetched markdown was retained; a value of zero can be an honest
-result when search has no usable results or every URL is unavailable. Paste both JSON responses
-here and I can verify the durable lifecycle is working.
+The worker performs bounded search and fetch passes, then asks the configured local LLM for
+structured candidate claims. Rancho treats that response as untrusted: it retains only bounded
+claims whose evidence UUIDs belong to the task and whose URLs match retained evidence. The final
+result renders citations from canonical stored URLs in the form
+`[evidence:<uuid>](<canonical-url>)`. The task becomes `completed` only after those checks and
+claim persistence succeed. Missing evidence, an unavailable model, malformed output, or no
+verified claims produces an honest `partial` result with a redacted terminal event.
+
+The task status response includes `evidence_count`, `claim_count`, and `result`. A positive claim
+count is auditable through the UUIDs embedded in the canonical citations; unsupported generated
+claims never appear in the result or durable claim table.
 
 To reconnect after an event, replay only newer events with its SSE ID:
 
@@ -78,6 +84,11 @@ Request cancellation or retry a partial task (up to three attempts):
 curl -sS -X POST http://127.0.0.1:8000/v1/tasks/<task_id>/cancel
 curl -sS -X POST http://127.0.0.1:8000/v1/tasks/<task_id>/retry
 ```
+
+For a local end-to-end verification, configure `RANCHO_LLM_PROVIDER`,
+`RANCHO_LLM_BASE_URL`, and `RANCHO_LLM_MODEL`, submit a task, wait for a terminal event, then
+inspect the status response. Every URL in `result` must also be present as a canonical URL in the
+task's retained evidence, and `completed` must have a positive `claim_count`.
 
 ## Running with Docker Compose
 

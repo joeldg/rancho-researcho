@@ -68,15 +68,15 @@ Goal: Establish the worker queue, database schemas, stateful agent research loop
   6. **Synthesize**: Compile the final answer markdown.
 
 ### 2.3 Evidence & Citation Engine
-- [ ] Implement a post-processing claim extractor:
-  - [ ] LLM identifies distinct facts/claims in the generated synthesis.
-  - [ ] Validate that every claim is backed by at least one excerpt from the retrieved `Evidence`.
-  - [ ] Insert claim-level citations and output normalized structured data models.
-- [ ] Ensure the final synthesis cannot cite any URL absent from the `Evidence` store.
+- [x] Implement a post-processing claim extractor:
+  - [x] LLM identifies distinct facts/claims in the generated synthesis.
+  - [x] Validate that every claim is backed by at least one retained, task-owned `Evidence` UUID.
+  - [x] Persist verified claims and render claim-level canonical citations in the task result.
+- [x] Ensure the final synthesis cannot cite any URL absent from the task's `Evidence` store.
 
 ### 2.4 Server-Sent Events (SSE) Streaming
 - [x] Create SSE endpoint `GET /v1/tasks/{task_id}/events` supporting connection recovery (`Last-Event-ID`).
-- [ ] Emit granular events during execution: `task.created`, `search.completed`, `evidence.extracted`, `claim.verified`, `progress`, and terminal states.
+- [x] Emit granular events during execution: `task.created`, `search.completed`, `evidence.extracted`, `claim.verified`, `progress`, and terminal states.
 
 ---
 

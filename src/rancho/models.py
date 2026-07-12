@@ -64,6 +64,8 @@ class ResearchTaskState(BaseModel):
     status: str
     attempt: int
     evidence_count: int
+    claim_count: int
+    result: str | None
     created_at: datetime
     updated_at: datetime
 
