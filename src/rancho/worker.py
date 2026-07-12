@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from rancho.config import Settings, get_settings
 from rancho.db import create_engine, create_session_factory
 from rancho.db_models import (
+    Candidate,
     Claim,
     EventType,
     Evidence,
@@ -25,6 +26,7 @@ from rancho.db_models import (
 )
 from rancho.evaluation import EvaluationUnavailableError, evaluate_evidence
 from rancho.extract import ContentUnavailableError, WebContentFetcher
+from rancho.findall import FindAllUnavailableError, extract_candidates
 from rancho.llm import get_local_llm_client
 from rancho.planning import plan_queries
 from rancho.search import (
@@ -59,7 +61,7 @@ async def run_research_task(ctx: dict[str, Any], task_id: str) -> None:
         llm = ctx.get("llm") or get_local_llm_client(settings)
         model_tokens_remaining = settings.research_max_model_tokens
         queries = [task.objective]
-        if settings.research_planning:
+        if settings.research_planning or task.task_type == "findall":
             if llm is None:
                 await _finish_partial(factory, task.id, "model_unavailable")
                 return
@@ -124,9 +126,7 @@ async def run_research_task(ctx: dict[str, Any], task_id: str) -> None:
                     return
                 evidence = await _task_evidence(factory, task.id)
                 if model_tokens_remaining < settings.research_max_planner_tokens:
-                    await _finish_partial(
-                        factory, task.id, "model_budget_exhausted"
-                    )
+                    await _finish_partial(factory, task.id, "model_budget_exhausted")
                     return
                 model_tokens_remaining -= settings.research_max_planner_tokens
                 try:
@@ -148,9 +148,7 @@ async def run_research_task(ctx: dict[str, Any], task_id: str) -> None:
                 else:
                     queued = set(queries)
                     secondary = [
-                        query
-                        for query in evaluation.queries
-                        if query not in queued
+                        query for query in evaluation.queries if query not in queued
                     ]
                     queries[0:0] = secondary
 
@@ -167,6 +165,15 @@ async def run_research_task(ctx: dict[str, Any], task_id: str) -> None:
         )
         if synthesis_tokens < 1:
             await _finish_partial(factory, task.id, "model_budget_exhausted")
+            return
+        if task.task_type == "findall":
+            await _extract_findall_and_finish(
+                factory,
+                task.id,
+                llm,
+                task.output_schema or {},
+                synthesis_tokens,
+            )
             return
         await _verify_and_finish(factory, task.id, llm, synthesis_tokens)
     finally:
@@ -317,9 +324,7 @@ async def _cancel_at_boundary(factory: async_sessionmaker, task_id: UUID) -> boo
     return True
 
 
-async def _task_evidence(
-    factory: async_sessionmaker, task_id: UUID
-) -> list[Evidence]:
+async def _task_evidence(factory: async_sessionmaker, task_id: UUID) -> list[Evidence]:
     """Load only retained evidence owned by one task for model evaluation."""
     async with factory() as session:
         return list(
@@ -406,6 +411,59 @@ async def _verify_and_finish(
         task.final_result = result
         task.status = TaskStatus.completed
         await _append_event(session, task_id, EventType.task_completed, "synthesis")
+        await session.commit()
+
+
+# @spec[RANCHO_FINDALL_AND_MONITORS.md#requirements]
+async def _extract_findall_and_finish(
+    factory: async_sessionmaker,
+    task_id: UUID,
+    llm: Any,
+    output_schema: dict[str, str],
+    max_output_tokens: int,
+) -> None:
+    """Persist only schema-valid candidates linked to task-owned evidence."""
+    if await _cancel_at_boundary(factory, task_id):
+        return
+    evidence = await _task_evidence(factory, task_id)
+    async with factory() as session:
+        task = await session.get(ResearchTask, task_id)
+        if task is None:
+            return
+        objective = task.objective
+    try:
+        verified = await asyncio.to_thread(
+            extract_candidates,
+            llm,
+            objective,
+            output_schema,
+            evidence,
+            max_output_tokens,
+        )
+    except FindAllUnavailableError:
+        await _finish_partial(factory, task_id, "candidate_extraction_unavailable")
+        return
+    if await _cancel_at_boundary(factory, task_id):
+        return
+    if not verified:
+        await _finish_partial(factory, task_id, "no_verified_candidates")
+        return
+    async with factory() as session:
+        task = await session.get(ResearchTask, task_id, with_for_update=True)
+        if task is None or task.status is not TaskStatus.running:
+            return
+        for item in verified:
+            session.add(
+                Candidate(task_id=task_id, data=item.data, evidence=list(item.evidence))
+            )
+        task.status = TaskStatus.completed
+        await _append_event(
+            session,
+            task_id,
+            EventType.task_completed,
+            "findall",
+            {"candidate_count": len(verified)},
+        )
         await session.commit()
 
 

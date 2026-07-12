@@ -27,6 +27,8 @@ _DURABLE_TABLES = {
     "claims",
     "claim_evidence",
     "task_events",
+    "candidates",
+    "candidate_evidence",
 }
 
 

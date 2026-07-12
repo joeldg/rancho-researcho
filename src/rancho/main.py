@@ -14,6 +14,7 @@ from rancho.config import Settings, get_settings
 from rancho.db import get_session_factory
 from rancho.db_models import (
     TERMINAL_STATES,
+    Candidate,
     Claim,
     EventType,
     Evidence,
@@ -23,9 +24,11 @@ from rancho.db_models import (
 )
 from rancho.enrich import SnippetEnricher
 from rancho.extract import WebContentFetcher
+from rancho.findall import create_or_get_findall_task
 from rancho.llm import get_local_llm_client
 from rancho.models import (
     ErrorResponse,
+    FindAllRequest,
     ResearchRequest,
     ResearchTaskAccepted,
     ResearchTaskState,
@@ -233,6 +236,66 @@ async def create_research(
     )
 
 
+# @spec[RANCHO_FINDALL_AND_MONITORS.md#requirements]
+@app.post(
+    "/v1/findall",
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={409: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+)
+async def create_findall(
+    request: FindAllRequest,
+    settings: Settings = Depends(get_settings),
+    session_factory: async_sessionmaker | None = Depends(get_session_factory),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> JSONResponse:
+    """Create and dispatch a bounded durable FindAll task."""
+    request_id = f"req_{uuid4().hex}"
+    if session_factory is None:
+        return JSONResponse(
+            status_code=503,
+            content=_error(
+                "database_unavailable", "No durable store is configured.", request_id
+            ),
+        )
+    async with session_factory() as session:
+        try:
+            task, _ = await create_or_get_findall_task(
+                session,
+                request.objective,
+                request.max_sources,
+                request.output_schema,
+                idempotency_key,
+            )
+        except ResearchConflictError:
+            return JSONResponse(
+                status_code=409,
+                content=_error(
+                    "idempotency_key_conflict",
+                    "The idempotency key was reused with a different request.",
+                    request_id,
+                ),
+            )
+    try:
+        await enqueue_research_task(task.id, settings.redis_url)
+    except QueueUnavailableError:
+        return JSONResponse(
+            status_code=503,
+            content=_error(
+                "queue_unavailable",
+                "The task was stored but could not be dispatched.",
+                request_id,
+            ),
+        )
+    status_url = _status_url(settings, task.id)
+    return JSONResponse(
+        status_code=202,
+        content=ResearchTaskAccepted(
+            task_id=str(task.id), status=task.status.value, status_url=status_url
+        ).model_dump(),
+        headers={"Location": status_url},
+    )
+
+
 # @spec[RANCHO_ASYNC_RESEARCH.md#task-lifecycle-and-worker-behavior]
 @app.get(
     "/v1/tasks/{task_id}",
@@ -267,13 +330,34 @@ async def get_task(
         claim_count = await session.scalar(
             select(func.count()).select_from(Claim).where(Claim.task_id == task.id)
         )
+        candidate_rows = (
+            (
+                await session.execute(
+                    select(Candidate).where(Candidate.task_id == task.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        candidates = []
+        for candidate in candidate_rows:
+            await session.refresh(candidate, ["evidence"])
+            candidates.append(
+                {
+                    "id": str(candidate.id),
+                    "fields": candidate.data,
+                    "evidence_ids": [str(item.id) for item in candidate.evidence],
+                }
+            )
         return ResearchTaskState(
             task_id=str(task.id),
+            task_type=task.task_type,
             status=task.status.value,
             attempt=task.attempt,
             evidence_count=int(count_result.scalar_one()),
             claim_count=int(claim_count or 0),
             result=task.final_result,
+            candidates=candidates,
             created_at=task.created_at,
             updated_at=task.updated_at,
         )
